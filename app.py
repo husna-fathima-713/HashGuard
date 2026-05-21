@@ -1,3 +1,3 @@
-from src.monitor import create_baseline
+from src.monitor import check_integrity
 
-create_baseline()
+check_integrity()
