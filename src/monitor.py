@@ -1,11 +1,25 @@
 import os
 import json
 
+from datetime import datetime
+
 from src.hasher import calculate_hash
 
 
 WATCHED_FOLDER = "watched"
 BASELINE_FILE = "baseline/hashes.json"
+LOG_FILE = "logs/security.log"
+
+
+def write_log(event_type, filename):
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    log_entry = f"{timestamp} - {event_type} - {filename}\n"
+
+    with open(LOG_FILE, "a") as log:
+
+        log.write(log_entry)
 
 
 def create_baseline():
@@ -47,7 +61,7 @@ def check_integrity():
 
     print("\nIntegrity Check Report:\n")
 
-    # Check modified files
+    # Check modified and deleted files
     for filename, old_hash in stored_hashes.items():
 
         if filename in current_hashes:
@@ -55,10 +69,12 @@ def check_integrity():
             if old_hash != current_hashes[filename]:
 
                 print(f"[MODIFIED] {filename}")
+                write_log("MODIFIED", filename)
 
         else:
 
             print(f"[DELETED] {filename}")
+            write_log("DELETED", filename)
 
     # Check newly added files
     for filename in current_hashes:
@@ -66,3 +82,4 @@ def check_integrity():
         if filename not in stored_hashes:
 
             print(f"[NEW FILE] {filename}")
+            write_log("NEW FILE", filename)
