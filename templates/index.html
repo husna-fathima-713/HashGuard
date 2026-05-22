@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+    <title>HashGuard Dashboard</title>
+
+</head>
+
+<body>
+
+    <h1>HashGuard Security Dashboard</h1>
+
+    {% if alerts %}
+
+        <ul>
+
+            {% for alert in alerts %}
+
+                <li>{{ alert }}</li>
+
+            {% endfor %}
+
+        </ul>
+
+    {% else %}
+
+        <p>No integrity violations detected.</p>
+
+    {% endif %}
+
+</body>
+
+</html>

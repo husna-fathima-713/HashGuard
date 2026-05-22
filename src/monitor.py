@@ -51,6 +51,8 @@ def check_integrity():
 
     current_hashes = {}
 
+    alerts = []
+
     for filename in os.listdir(WATCHED_FOLDER):
 
         file_path = os.path.join(WATCHED_FOLDER, filename)
@@ -59,8 +61,6 @@ def check_integrity():
 
             current_hashes[filename] = calculate_hash(file_path)
 
-    print("\nIntegrity Check Report:\n")
-
     # Check modified and deleted files
     for filename, old_hash in stored_hashes.items():
 
@@ -68,12 +68,18 @@ def check_integrity():
 
             if old_hash != current_hashes[filename]:
 
-                print(f"[MODIFIED] {filename}")
+                alert = f"[MODIFIED] {filename}"
+
+                alerts.append(alert)
+
                 write_log("MODIFIED", filename)
 
         else:
 
-            print(f"[DELETED] {filename}")
+            alert = f"[DELETED] {filename}"
+
+            alerts.append(alert)
+
             write_log("DELETED", filename)
 
     # Check newly added files
@@ -81,5 +87,10 @@ def check_integrity():
 
         if filename not in stored_hashes:
 
-            print(f"[NEW FILE] {filename}")
+            alert = f"[NEW FILE] {filename}"
+
+            alerts.append(alert)
+
             write_log("NEW FILE", filename)
+
+    return alerts
