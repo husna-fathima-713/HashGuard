@@ -5,6 +5,8 @@
 
     <title>HashGuard Dashboard</title>
 
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
 </head>
 
 <body>
@@ -13,19 +15,19 @@
 
     {% if alerts %}
 
-        <ul>
+        {% for alert in alerts %}
 
-            {% for alert in alerts %}
+            <div class="alert-box">
 
-                <li>{{ alert }}</li>
+                {{ alert }}
 
-            {% endfor %}
+            </div>
 
-        </ul>
+        {% endfor %}
 
     {% else %}
 
-        <p>No integrity violations detected.</p>
+        <p class="safe">No integrity violations detected.</p>
 
     {% endif %}
 
