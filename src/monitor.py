@@ -13,11 +13,11 @@ LOG_FILE = "logs/security.log"
 previous_alerts = set()
 
 
-def write_log(event_type, filename):
+def write_log(event_type, filename, severity):
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    log_entry = f"{timestamp} - {event_type} - {filename}\n"
+    log_entry = f"{timestamp} | {severity} | {event_type} | {filename}\n"
 
     with open(LOG_FILE, "a") as log:
 
@@ -74,7 +74,9 @@ def check_integrity():
 
             if old_hash != current_hashes[filename]:
 
-                alert = f"[MODIFIED] {filename}"
+                severity = "HIGH"
+
+                alert = f"[{severity}] MODIFIED: {filename}"
 
                 alerts.append(alert)
 
@@ -82,11 +84,13 @@ def check_integrity():
 
                 if alert not in previous_alerts:
 
-                    write_log("MODIFIED", filename)
+                    write_log("MODIFIED", filename, severity)
 
         else:
 
-            alert = f"[DELETED] {filename}"
+            severity = "CRITICAL"
+
+            alert = f"[{severity}] DELETED: {filename}"
 
             alerts.append(alert)
 
@@ -94,14 +98,16 @@ def check_integrity():
 
             if alert not in previous_alerts:
 
-                write_log("DELETED", filename)
+                write_log("DELETED", filename, severity)
 
     # Check newly added files
     for filename in current_hashes:
 
         if filename not in stored_hashes:
 
-            alert = f"[NEW FILE] {filename}"
+            severity = "MEDIUM"
+
+            alert = f"[{severity}] NEW FILE: {filename}"
 
             alerts.append(alert)
 
@@ -109,7 +115,7 @@ def check_integrity():
 
             if alert not in previous_alerts:
 
-                write_log("NEW FILE", filename)
+                write_log("NEW FILE", filename, severity)
 
     previous_alerts = current_alerts
 
