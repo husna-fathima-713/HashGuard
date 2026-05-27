@@ -9,8 +9,18 @@ from src.hasher import calculate_hash
 WATCHED_FOLDER = "watched"
 BASELINE_FILE = "baseline/hashes.json"
 LOG_FILE = "logs/security.log"
+WHITELIST_FILE = "whitelist.json"
 
 previous_alerts = set()
+
+
+def load_whitelist():
+
+    with open(WHITELIST_FILE, "r") as file:
+
+        data = json.load(file)
+
+    return data["ignored_files"]
 
 
 def write_log(event_type, filename, severity):
@@ -28,7 +38,13 @@ def create_baseline():
 
     hashes = {}
 
+    ignored_files = load_whitelist()
+
     for filename in os.listdir(WATCHED_FOLDER):
+
+        if filename in ignored_files:
+
+            continue
 
         file_path = os.path.join(WATCHED_FOLDER, filename)
 
@@ -49,6 +65,8 @@ def check_integrity():
 
     global previous_alerts
 
+    ignored_files = load_whitelist()
+
     with open(BASELINE_FILE, "r") as baseline:
 
         stored_hashes = json.load(baseline)
@@ -60,6 +78,10 @@ def check_integrity():
     current_alerts = set()
 
     for filename in os.listdir(WATCHED_FOLDER):
+
+        if filename in ignored_files:
+
+            continue
 
         file_path = os.path.join(WATCHED_FOLDER, filename)
 
