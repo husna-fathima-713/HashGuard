@@ -10,6 +10,8 @@ WATCHED_FOLDER = "watched"
 BASELINE_FILE = "baseline/hashes.json"
 LOG_FILE = "logs/security.log"
 
+previous_alerts = set()
+
 
 def write_log(event_type, filename):
 
@@ -45,6 +47,8 @@ def create_baseline():
 
 def check_integrity():
 
+    global previous_alerts
+
     with open(BASELINE_FILE, "r") as baseline:
 
         stored_hashes = json.load(baseline)
@@ -52,6 +56,8 @@ def check_integrity():
     current_hashes = {}
 
     alerts = []
+
+    current_alerts = set()
 
     for filename in os.listdir(WATCHED_FOLDER):
 
@@ -72,7 +78,11 @@ def check_integrity():
 
                 alerts.append(alert)
 
-                write_log("MODIFIED", filename)
+                current_alerts.add(alert)
+
+                if alert not in previous_alerts:
+
+                    write_log("MODIFIED", filename)
 
         else:
 
@@ -80,7 +90,11 @@ def check_integrity():
 
             alerts.append(alert)
 
-            write_log("DELETED", filename)
+            current_alerts.add(alert)
+
+            if alert not in previous_alerts:
+
+                write_log("DELETED", filename)
 
     # Check newly added files
     for filename in current_hashes:
@@ -91,6 +105,12 @@ def check_integrity():
 
             alerts.append(alert)
 
-            write_log("NEW FILE", filename)
+            current_alerts.add(alert)
+
+            if alert not in previous_alerts:
+
+                write_log("NEW FILE", filename)
+
+    previous_alerts = current_alerts
 
     return alerts
