@@ -1,39 +1,41 @@
-from flask import Flask, render_template
+from flask import Flask, render_template, send_file
+import json
+import os
 
 from src.monitor import check_integrity
 
-import threading
-import time
-
-
 app = Flask(__name__)
-
-latest_alerts = []
-
-
-def background_monitor():
-
-    global latest_alerts
-
-    while True:
-
-        latest_alerts = check_integrity()
-
-        time.sleep(5)
 
 
 @app.route("/")
-def home():
+def dashboard():
 
-    return render_template("index.html", alerts=latest_alerts)
+    alerts = check_integrity()
+
+    report_data = {
+        "total_alerts": len(alerts),
+        "alerts": alerts
+    }
+
+    os.makedirs("reports", exist_ok=True)
+
+    report_path = "reports/security_report.json"
+
+    with open(report_path, "w") as report:
+
+        json.dump(report_data, report, indent=4)
+
+    return render_template("index.html", alerts=alerts)
+
+
+@app.route("/download-report")
+def download_report():
+
+    report_path = "reports/security_report.json"
+
+    return send_file(report_path, as_attachment=True)
 
 
 if __name__ == "__main__":
-
-    monitor_thread = threading.Thread(target=background_monitor)
-
-    monitor_thread.daemon = True
-
-    monitor_thread.start()
 
     app.run(debug=True)
