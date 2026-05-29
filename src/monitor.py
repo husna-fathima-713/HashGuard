@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 
 from src.hasher import calculate_hash
+from src.email_alert import send_email_alert
 
 
 WATCHED_FOLDER = "watched"
@@ -121,6 +122,8 @@ def check_integrity():
             if alert not in previous_alerts:
 
                 write_log("DELETED", filename, severity)
+
+                send_email_alert(alert)
 
     # Check newly added files
     for filename in current_hashes:

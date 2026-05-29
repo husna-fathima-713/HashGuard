@@ -1,6 +1,6 @@
 {
     "total_alerts": 1,
     "alerts": [
-        "[HIGH] MODIFIED: test.txt"
+        "[CRITICAL] DELETED: test.txt"
     ]
 }
