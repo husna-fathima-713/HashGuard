@@ -1,11 +1,15 @@
+import os
 import smtplib
+
+from dotenv import load_dotenv
 from email.mime.text import MIMEText
 
 
-EMAIL_ADDRESS = "your_email@gmail.com"
-EMAIL_PASSWORD = "your_app_password"
+load_dotenv()
 
-TO_EMAIL = "your_email@gmail.com"
+EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+TO_EMAIL = os.getenv("TO_EMAIL")
 
 
 def send_email_alert(message):
