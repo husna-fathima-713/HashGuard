@@ -2,7 +2,7 @@ from flask import Flask, render_template, send_file
 import json
 import os
 
-from src.monitor import check_integrity
+from src.monitor import check_integrity, create_baseline
 
 app = Flask(__name__)
 
@@ -34,6 +34,17 @@ def download_report():
     report_path = "reports/security_report.json"
 
     return send_file(report_path, as_attachment=True)
+
+
+@app.route("/update-baseline")
+def update_baseline():
+
+    create_baseline()
+
+    return """
+    <h2>Baseline Updated Successfully</h2>
+    <a href='/'>Return to Dashboard</a>
+    """
 
 
 if __name__ == "__main__":

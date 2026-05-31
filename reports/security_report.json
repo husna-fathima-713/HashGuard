@@ -1,6 +1,4 @@
 {
-    "total_alerts": 1,
-    "alerts": [
-        "[HIGH] MODIFIED: test.txt"
-    ]
+    "total_alerts": 0,
+    "alerts": []
 }
