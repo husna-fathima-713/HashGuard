@@ -3,7 +3,7 @@ import json
 import os
 
 from src.monitor import check_integrity, create_baseline
-
+from src.database import initialize_database
 app = Flask(__name__)
 
 
@@ -45,7 +45,7 @@ def update_baseline():
     <h2>Baseline Updated Successfully</h2>
     <a href='/'>Return to Dashboard</a>
     """
-
+initialize_database()
 
 if __name__ == "__main__":
 
