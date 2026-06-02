@@ -5,6 +5,7 @@ from datetime import datetime
 
 from src.hasher import calculate_hash
 from src.email_alert import send_email_alert
+from src.database import save_event
 
 
 WATCHED_FOLDER = "watched"
@@ -33,6 +34,13 @@ def write_log(event_type, filename, severity):
     with open(LOG_FILE, "a") as log:
 
         log.write(log_entry)
+
+    save_event(
+        timestamp,
+        severity,
+        event_type,
+        filename
+    )
 
 
 def create_baseline():
@@ -90,7 +98,7 @@ def check_integrity():
 
             current_hashes[filename] = calculate_hash(file_path)
 
-    # Check modified and deleted files
+    # Check modified files
     for filename, old_hash in stored_hashes.items():
 
         if filename in current_hashes:
@@ -107,7 +115,11 @@ def check_integrity():
 
                 if alert not in previous_alerts:
 
-                    write_log("MODIFIED", filename, severity)
+                    write_log(
+                        "MODIFIED",
+                        filename,
+                        severity
+                    )
 
         else:
 
@@ -121,11 +133,15 @@ def check_integrity():
 
             if alert not in previous_alerts:
 
-                write_log("DELETED", filename, severity)
+                write_log(
+                    "DELETED",
+                    filename,
+                    severity
+                )
 
                 send_email_alert(alert)
 
-    # Check newly added files
+    # Check new files
     for filename in current_hashes:
 
         if filename not in stored_hashes:
@@ -140,7 +156,11 @@ def check_integrity():
 
             if alert not in previous_alerts:
 
-                write_log("NEW FILE", filename, severity)
+                write_log(
+                    "NEW FILE",
+                    filename,
+                    severity
+                )
 
     previous_alerts = current_alerts
 

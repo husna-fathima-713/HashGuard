@@ -26,5 +26,21 @@ def initialize_database():
     """)
 
     connection.commit()
+    connection.close()
 
+
+def save_event(timestamp, severity, event_type, filename):
+
+    connection = sqlite3.connect(DB_PATH)
+
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        INSERT INTO security_events
+        (timestamp, severity, event_type, filename)
+
+        VALUES (?, ?, ?, ?)
+    """, (timestamp, severity, event_type, filename))
+
+    connection.commit()
     connection.close()
