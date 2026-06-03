@@ -44,3 +44,25 @@ def save_event(timestamp, severity, event_type, filename):
 
     connection.commit()
     connection.close()
+
+
+def get_all_events():
+
+    connection = sqlite3.connect(DB_PATH)
+
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT timestamp,
+               severity,
+               event_type,
+               filename
+        FROM security_events
+        ORDER BY id DESC
+    """)
+
+    rows = cursor.fetchall()
+
+    connection.close()
+
+    return rows
