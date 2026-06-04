@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+    <title>Security Analytics</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+</head>
+
+<body>
+
+    <h1>Security Analytics Dashboard</h1>
+
+    <a href="/">
+        <button>Back to Dashboard</button>
+    </a>
+
+    <br><br>
+
+    <h2>Event Statistics</h2>
+
+    <table border="1">
+
+        <tr>
+            <th>Severity</th>
+            <th>Total Events</th>
+        </tr>
+
+        {% for stat in stats %}
+
+        <tr>
+            <td>{{ stat[0] }}</td>
+            <td>{{ stat[1] }}</td>
+        </tr>
+
+        {% endfor %}
+
+    </table>
+
+    <br>
+
+    <h2>Most Targeted File</h2>
+
+    {% if top_file %}
+
+        <p>
+            <strong>{{ top_file[0] }}</strong>
+            ({{ top_file[1] }} alerts)
+        </p>
+
+    {% else %}
+
+        <p>No events recorded yet.</p>
+
+    {% endif %}
+
+</body>
+
+</html>

@@ -3,7 +3,12 @@ import json
 import os
 
 from src.monitor import check_integrity, create_baseline
-from src.database import initialize_database, get_all_events
+from src.database import (
+    initialize_database,
+    get_all_events,
+    get_event_statistics,
+    get_most_targeted_file
+)
 
 app = Flask(__name__)
 
@@ -32,9 +37,10 @@ def dashboard():
 @app.route("/download-report")
 def download_report():
 
-    report_path = "reports/security_report.json"
-
-    return send_file(report_path, as_attachment=True)
+    return send_file(
+        "reports/security_report.json",
+        as_attachment=True
+    )
 
 
 @app.route("/update-baseline")
@@ -56,6 +62,20 @@ def history():
     return render_template(
         "history.html",
         events=events
+    )
+
+
+@app.route("/analytics")
+def analytics():
+
+    stats = get_event_statistics()
+
+    top_file = get_most_targeted_file()
+
+    return render_template(
+        "analytics.html",
+        stats=stats,
+        top_file=top_file
     )
 
 

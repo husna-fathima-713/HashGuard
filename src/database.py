@@ -66,3 +66,45 @@ def get_all_events():
     connection.close()
 
     return rows
+
+
+def get_event_statistics():
+
+    connection = sqlite3.connect(DB_PATH)
+
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT severity,
+               COUNT(*)
+        FROM security_events
+        GROUP BY severity
+    """)
+
+    stats = cursor.fetchall()
+
+    connection.close()
+
+    return stats
+
+
+def get_most_targeted_file():
+
+    connection = sqlite3.connect(DB_PATH)
+
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT filename,
+               COUNT(*) as total
+        FROM security_events
+        GROUP BY filename
+        ORDER BY total DESC
+        LIMIT 1
+    """)
+
+    result = cursor.fetchone()
+
+    connection.close()
+
+    return result
