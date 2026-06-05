@@ -5,7 +5,10 @@
 
     <title>Security Analytics</title>
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
 
 </head>
 
@@ -31,8 +34,10 @@
         {% for stat in stats %}
 
         <tr>
+
             <td>{{ stat[0] }}</td>
             <td>{{ stat[1] }}</td>
+
         </tr>
 
         {% endfor %}
@@ -55,6 +60,61 @@
         <p>No events recorded yet.</p>
 
     {% endif %}
+
+    <hr>
+
+    <h2>Severity Distribution</h2>
+
+    <canvas id="severityChart"></canvas>
+
+    <br><br>
+
+    <h2>Severity Pie Chart</h2>
+
+    <canvas id="severityPie"></canvas>
+
+    <script>
+
+        const labels = [
+            {% for stat in stats %}
+                "{{ stat[0] }}",
+            {% endfor %}
+        ];
+
+        const values = [
+            {% for stat in stats %}
+                {{ stat[1] }},
+            {% endfor %}
+        ];
+
+        new Chart(
+            document.getElementById('severityChart'),
+            {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Security Events',
+                        data: values
+                    }]
+                }
+            }
+        );
+
+        new Chart(
+            document.getElementById('severityPie'),
+            {
+                type: 'pie',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: values
+                    }]
+                }
+            }
+        );
+
+    </script>
 
 </body>
 
