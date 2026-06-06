@@ -10,6 +10,8 @@ from src.database import (
     get_most_targeted_file
 )
 
+from src.pdf_report import generate_pdf_report
+
 app = Flask(__name__)
 
 
@@ -31,7 +33,10 @@ def dashboard():
 
         json.dump(report_data, report, indent=4)
 
-    return render_template("index.html", alerts=alerts)
+    return render_template(
+        "index.html",
+        alerts=alerts
+    )
 
 
 @app.route("/download-report")
@@ -39,6 +44,29 @@ def download_report():
 
     return send_file(
         "reports/security_report.json",
+        as_attachment=True
+    )
+
+
+@app.route("/download-pdf")
+def download_pdf():
+
+    os.makedirs("reports", exist_ok=True)
+
+    stats = get_event_statistics()
+
+    top_file = get_most_targeted_file()
+
+    pdf_path = "reports/HashGuard_Security_Report.pdf"
+
+    generate_pdf_report(
+        pdf_path,
+        stats,
+        top_file
+    )
+
+    return send_file(
+        pdf_path,
         as_attachment=True
     )
 
