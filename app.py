@@ -1,13 +1,16 @@
-from flask import Flask, render_template, send_file
+from flask import Flask, render_template, send_file, request
 import json
 import os
 
 from src.monitor import check_integrity, create_baseline
+
 from src.database import (
     initialize_database,
     get_all_events,
     get_event_statistics,
-    get_most_targeted_file
+    get_most_targeted_file,
+    search_events,
+    filter_by_severity
 )
 
 from src.pdf_report import generate_pdf_report
@@ -27,9 +30,10 @@ def dashboard():
 
     os.makedirs("reports", exist_ok=True)
 
-    report_path = "reports/security_report.json"
-
-    with open(report_path, "w") as report:
+    with open(
+        "reports/security_report.json",
+        "w"
+    ) as report:
 
         json.dump(report_data, report, indent=4)
 
@@ -50,8 +54,6 @@ def download_report():
 
 @app.route("/download-pdf")
 def download_pdf():
-
-    os.makedirs("reports", exist_ok=True)
 
     stats = get_event_statistics()
 
@@ -86,6 +88,38 @@ def update_baseline():
 def history():
 
     events = get_all_events()
+
+    return render_template(
+        "history.html",
+        events=events
+    )
+
+
+@app.route("/search")
+def search():
+
+    filename = request.args.get(
+        "filename",
+        ""
+    )
+
+    events = search_events(filename)
+
+    return render_template(
+        "history.html",
+        events=events
+    )
+
+
+@app.route("/filter")
+def filter_events():
+
+    severity = request.args.get(
+        "severity",
+        ""
+    )
+
+    events = filter_by_severity(severity)
 
     return render_template(
         "history.html",

@@ -108,3 +108,49 @@ def get_most_targeted_file():
     connection.close()
 
     return result
+
+
+def search_events(filename):
+
+    connection = sqlite3.connect(DB_PATH)
+
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT timestamp,
+               severity,
+               event_type,
+               filename
+        FROM security_events
+        WHERE filename LIKE ?
+        ORDER BY id DESC
+    """, (f"%{filename}%",))
+
+    rows = cursor.fetchall()
+
+    connection.close()
+
+    return rows
+
+
+def filter_by_severity(severity):
+
+    connection = sqlite3.connect(DB_PATH)
+
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT timestamp,
+               severity,
+               event_type,
+               filename
+        FROM security_events
+        WHERE severity = ?
+        ORDER BY id DESC
+    """, (severity,))
+
+    rows = cursor.fetchall()
+
+    connection.close()
+
+    return rows

@@ -5,7 +5,8 @@
 
     <title>Security Event History</title>
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
 
 </head>
 
@@ -16,6 +17,45 @@
     <a href="/">
         <button>Back to Dashboard</button>
     </a>
+
+    <br><br>
+
+    <form action="/search">
+
+        <input
+            type="text"
+            name="filename"
+            placeholder="Search filename">
+
+        <button type="submit">
+
+            Search
+
+        </button>
+
+    </form>
+
+    <br>
+
+    <form action="/filter">
+
+        <select name="severity">
+
+            <option value="HIGH">HIGH</option>
+
+            <option value="MEDIUM">MEDIUM</option>
+
+            <option value="CRITICAL">CRITICAL</option>
+
+        </select>
+
+        <button type="submit">
+
+            Filter
+
+        </button>
+
+    </form>
 
     <br><br>
 
