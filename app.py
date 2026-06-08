@@ -1,4 +1,12 @@
-from flask import Flask, render_template, send_file, request
+from flask import (
+    Flask,
+    render_template,
+    send_file,
+    request,
+    redirect,
+    session
+)
+
 import json
 import os
 
@@ -17,9 +25,49 @@ from src.pdf_report import generate_pdf_report
 
 app = Flask(__name__)
 
+app.secret_key = "hashguard_secret_key"
+
+
+USERNAME = "admin"
+PASSWORD = "hashguard123"
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+
+    if request.method == "POST":
+
+        username = request.form.get("username")
+        password = request.form.get("password")
+
+        if username == USERNAME and password == PASSWORD:
+
+            session["logged_in"] = True
+
+            return redirect("/")
+
+        return render_template(
+            "login.html",
+            error="Invalid Credentials"
+        )
+
+    return render_template("login.html")
+
+
+@app.route("/logout")
+def logout():
+
+    session.clear()
+
+    return redirect("/login")
+
 
 @app.route("/")
 def dashboard():
+
+    if not session.get("logged_in"):
+
+        return redirect("/login")
 
     alerts = check_integrity()
 
@@ -46,6 +94,10 @@ def dashboard():
 @app.route("/download-report")
 def download_report():
 
+    if not session.get("logged_in"):
+
+        return redirect("/login")
+
     return send_file(
         "reports/security_report.json",
         as_attachment=True
@@ -54,6 +106,10 @@ def download_report():
 
 @app.route("/download-pdf")
 def download_pdf():
+
+    if not session.get("logged_in"):
+
+        return redirect("/login")
 
     stats = get_event_statistics()
 
@@ -76,6 +132,10 @@ def download_pdf():
 @app.route("/update-baseline")
 def update_baseline():
 
+    if not session.get("logged_in"):
+
+        return redirect("/login")
+
     create_baseline()
 
     return """
@@ -87,6 +147,10 @@ def update_baseline():
 @app.route("/history")
 def history():
 
+    if not session.get("logged_in"):
+
+        return redirect("/login")
+
     events = get_all_events()
 
     return render_template(
@@ -97,6 +161,10 @@ def history():
 
 @app.route("/search")
 def search():
+
+    if not session.get("logged_in"):
+
+        return redirect("/login")
 
     filename = request.args.get(
         "filename",
@@ -114,6 +182,10 @@ def search():
 @app.route("/filter")
 def filter_events():
 
+    if not session.get("logged_in"):
+
+        return redirect("/login")
+
     severity = request.args.get(
         "severity",
         ""
@@ -129,6 +201,10 @@ def filter_events():
 
 @app.route("/analytics")
 def analytics():
+
+    if not session.get("logged_in"):
+
+        return redirect("/login")
 
     stats = get_event_statistics()
 

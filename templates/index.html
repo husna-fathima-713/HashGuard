@@ -35,9 +35,15 @@
         <button>View Analytics</button>
     </a>
 
+    <a href="/logout">
+        <button>Logout</button>
+    </a>
+
     <br><br>
 
     {% if alerts %}
+
+        <h2>Active Security Alerts</h2>
 
         {% for alert in alerts %}
 
@@ -51,7 +57,11 @@
 
     {% else %}
 
-        <p class="safe">No integrity violations detected.</p>
+        <p class="safe">
+
+            No integrity violations detected.
+
+        </p>
 
     {% endif %}
 
