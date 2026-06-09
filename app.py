@@ -18,7 +18,9 @@ from src.database import (
     get_event_statistics,
     get_most_targeted_file,
     search_events,
-    filter_by_severity
+    filter_by_severity,
+    register_user,
+    verify_user
 )
 
 from src.pdf_report import generate_pdf_report
@@ -28,8 +30,6 @@ app = Flask(__name__)
 app.secret_key = "hashguard_secret_key"
 
 
-USERNAME = "admin"
-PASSWORD = "hashguard123"
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -38,11 +38,14 @@ def login():
     if request.method == "POST":
 
         username = request.form.get("username")
+
         password = request.form.get("password")
 
-        if username == USERNAME and password == PASSWORD:
+        if verify_user(username, password):
 
             session["logged_in"] = True
+
+            session["username"] = username
 
             return redirect("/")
 
@@ -52,6 +55,31 @@ def login():
         )
 
     return render_template("login.html")
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+
+    if request.method == "POST":
+
+        username = request.form.get("username")
+
+        password = request.form.get("password")
+
+        success = register_user(
+            username,
+            password
+        )
+
+        if success:
+
+            return redirect("/login")
+
+        return render_template(
+            "register.html",
+            error="Username already exists"
+        )
+
+    return render_template("register.html")
 
 
 @app.route("/logout")

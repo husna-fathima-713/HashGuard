@@ -1,6 +1,6 @@
 import sqlite3
 import os
-
+import hashlib
 
 DB_PATH = "database/security.db"
 
@@ -21,6 +21,16 @@ def initialize_database():
             severity TEXT,
             event_type TEXT,
             filename TEXT
+
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE,
+            password TEXT
 
         )
     """)
@@ -154,3 +164,59 @@ def filter_by_severity(severity):
     connection.close()
 
     return rows
+
+
+def register_user(username, password):
+
+    connection = sqlite3.connect(DB_PATH)
+
+    cursor = connection.cursor()
+
+    password_hash = hashlib.sha256(
+        password.encode()
+    ).hexdigest()
+
+    try:
+
+        cursor.execute("""
+            INSERT INTO users
+            (username, password)
+
+            VALUES (?, ?)
+        """, (username, password_hash))
+
+        connection.commit()
+
+        success = True
+
+    except:
+
+        success = False
+
+    connection.close()
+
+    return success
+
+
+def verify_user(username, password):
+
+    connection = sqlite3.connect(DB_PATH)
+
+    cursor = connection.cursor()
+
+    password_hash = hashlib.sha256(
+        password.encode()
+    ).hexdigest()
+
+    cursor.execute("""
+        SELECT *
+        FROM users
+        WHERE username = ?
+        AND password = ?
+    """, (username, password_hash))
+
+    user = cursor.fetchone()
+
+    connection.close()
+
+    return user is not None
