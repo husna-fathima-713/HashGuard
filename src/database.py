@@ -1,6 +1,10 @@
 import sqlite3
 import os
-import hashlib
+
+from werkzeug.security import (
+    generate_password_hash,
+    check_password_hash
+)
 
 DB_PATH = "database/security.db"
 
@@ -172,9 +176,7 @@ def register_user(username, password):
 
     cursor = connection.cursor()
 
-    password_hash = hashlib.sha256(
-        password.encode()
-    ).hexdigest()
+    password_hash = generate_password_hash(password)
 
     try:
 
@@ -204,19 +206,23 @@ def verify_user(username, password):
 
     cursor = connection.cursor()
 
-    password_hash = hashlib.sha256(
-        password.encode()
-    ).hexdigest()
-
     cursor.execute("""
-        SELECT *
+        SELECT password
         FROM users
         WHERE username = ?
-        AND password = ?
-    """, (username, password_hash))
+    """, (username,))
 
-    user = cursor.fetchone()
+    result = cursor.fetchone()
 
     connection.close()
 
-    return user is not None
+    if result is None:
+
+        return False
+
+    stored_hash = result[0]
+
+    return check_password_hash(
+        stored_hash,
+        password
+    )
