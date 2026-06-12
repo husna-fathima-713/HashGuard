@@ -9,6 +9,7 @@ from flask import (
 
 import json
 import os
+import csv
 
 from src.monitor import check_integrity, create_baseline
 
@@ -28,8 +29,6 @@ from src.pdf_report import generate_pdf_report
 app = Flask(__name__)
 
 app.secret_key = "hashguard_secret_key"
-
-
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -55,6 +54,7 @@ def login():
         )
 
     return render_template("login.html")
+
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
@@ -153,6 +153,44 @@ def download_pdf():
 
     return send_file(
         pdf_path,
+        as_attachment=True
+    )
+
+
+@app.route("/download-csv")
+def download_csv():
+
+    if not session.get("logged_in"):
+
+        return redirect("/login")
+
+    events = get_all_events()
+
+    os.makedirs("reports", exist_ok=True)
+
+    csv_path = "reports/security_events.csv"
+
+    with open(
+        csv_path,
+        "w",
+        newline=""
+    ) as csv_file:
+
+        writer = csv.writer(csv_file)
+
+        writer.writerow([
+            "Timestamp",
+            "Severity",
+            "Event Type",
+            "Filename"
+        ])
+
+        for event in events:
+
+            writer.writerow(event)
+
+    return send_file(
+        csv_path,
         as_attachment=True
     )
 
