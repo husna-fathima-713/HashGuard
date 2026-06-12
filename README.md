@@ -14,12 +14,12 @@ Organizations and individuals often face unauthorized modifications to sensitive
 
 HashGuard addresses this problem by:
 
-- Monitoring file integrity
-- Detecting suspicious changes
-- Recording security events
-- Providing security analytics
-- Generating downloadable reports
-- Alerting users about critical incidents
+* Monitoring file integrity
+* Detecting suspicious changes
+* Recording security events
+* Providing security analytics
+* Generating downloadable reports
+* Alerting users about critical incidents
 
 ---
 
@@ -27,48 +27,49 @@ HashGuard addresses this problem by:
 
 ### Core Security Features
 
-- SHA-256 file integrity verification
-- Baseline hash generation
-- Detection of modified files
-- Detection of deleted files
-- Detection of newly added files
+* SHA-256 file integrity verification
+* Baseline hash generation
+* Detection of modified files
+* Detection of deleted files
+* Detection of newly added files
 
 ### Monitoring Features
 
-- Continuous monitoring
-- Event logging
-- Severity classification
+* Continuous monitoring
+* Event logging
+* Severity classification
 
 ### Database Features
 
-- SQLite event storage
-- Historical event tracking
-- Search functionality
-- Severity-based filtering
+* SQLite event storage
+* Historical event tracking
+* Search functionality
+* Severity-based filtering
 
 ### Dashboard Features
 
-- Flask web dashboard
-- Live alert display
-- Event history viewer
-- Security analytics dashboard
+* Flask web dashboard
+* Live alert display
+* Event history viewer
+* Security analytics dashboard
 
 ### Reporting Features
 
-- JSON report generation
-- PDF report generation
-- Downloadable security reports
+* JSON report generation
+* PDF report generation
+* CSV report generation
+* Downloadable security reports
 
 ### Authentication Features
 
-- User registration
-- Secure login
-- Session management
-- Password hashing using Werkzeug
+* User registration
+* Secure login
+* Session management
+* Password hashing
 
 ### Notification Features
 
-- Email alerts for critical events
+* Email alerts for critical events
 
 ---
 
@@ -96,7 +97,7 @@ HashGuard addresses this problem by:
 
 ┌──────────────┐  ┌────────────────┐  ┌────────────────┐
 │ Integrity    │  │ Analytics      │  │ Report Engine  │
-│ Monitor      │  │ Dashboard      │  │ JSON / PDF     │
+│ Monitor      │  │ Dashboard      │  │ JSON/PDF/CSV   │
 └──────┬───────┘  └───────┬────────┘  └────────┬───────┘
        │                  │                    │
        ▼                  ▼                    ▼
@@ -121,6 +122,8 @@ HashGuard addresses this problem by:
                   └────────────────────┘
 ```
 
+---
+
 ## Project Structure
 
 ```text
@@ -138,6 +141,15 @@ HashGuard/
 │   └── security.log
 │
 ├── reports/
+│
+├── screenshots/
+│   ├── login.jpeg
+│   ├── register.jpeg
+│   ├── dashboard.jpeg
+│   ├── history.jpeg
+│   ├── analytics.jpeg
+│   ├── csv-report.jpeg
+│   └── pdf-report.jpeg
 │
 ├── src/
 │   ├── monitor.py
@@ -165,15 +177,15 @@ HashGuard/
 
 ## Technologies Used
 
-- Python
-- Flask
-- SQLite
-- SHA-256 Hashing
-- Werkzeug Authentication
-- HTML
-- CSS
-- JSON
-- ReportLab
+* Python
+* Flask
+* SQLite
+* SHA-256 Hashing
+* Werkzeug Password Hashing
+* HTML
+* CSS
+* JSON
+* ReportLab
 
 ---
 
@@ -213,7 +225,7 @@ python app.py
 
 Navigate to:
 
-```
+```text
 http://127.0.0.1:5000/register
 ```
 
@@ -221,7 +233,7 @@ http://127.0.0.1:5000/register
 
 Navigate to:
 
-```
+```text
 http://127.0.0.1:5000/login
 ```
 
@@ -235,21 +247,53 @@ watched/
 
 HashGuard will monitor those files for:
 
-- Modification
-- Deletion
-- New additions
+* Modification
+* Deletion
+* New additions
+
+---
+
+## Screenshots
+
+### Login Page
+
+![Login](screenshots/login.jpeg)
+
+### Register Page
+
+![Register](screenshots/register.jpeg)
+
+### Dashboard
+
+![Dashboard](screenshots/dashboard.jpeg)
+
+### Event History
+
+![History](screenshots/history.jpeg)
+
+### Analytics Dashboard
+
+![Analytics](screenshots/analytics.jpeg)
+
+### CSV Export
+
+![CSV](screenshots/csv-report.jpeg)
+
+### PDF Export
+
+![PDF](screenshots/pdf-report.jpeg)
 
 ---
 
 ## Future Enhancements
 
-- Multi-user support
-- Role-based access control
-- Real-time WebSocket monitoring
-- Cloud storage protection
-- Mobile notifications
-- Threat intelligence integration
-- Machine learning anomaly detection
+* Multi-user support
+* Role-based access control
+* Real-time WebSocket monitoring
+* Cloud storage protection
+* Mobile notifications
+* Threat intelligence integration
+* Machine learning anomaly detection
 
 ---
 
