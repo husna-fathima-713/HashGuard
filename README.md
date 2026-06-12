@@ -299,10 +299,7 @@ HashGuard will monitor those files for:
 
 ## Contributors
 
-Husna Fathima
-
-Computer Science Engineering
-IoT, Cybersecurity and Blockchain
+HF
 
 ---
 
