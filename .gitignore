@@ -1,2 +1,8 @@
-.env
+reports/*.pdf
+reports/*.csv
+reports/*.json
+
+database/*.db
+
 __pycache__/
+*.pyc
