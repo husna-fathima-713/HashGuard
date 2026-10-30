@@ -1,74 +1,122 @@
-<!DOCTYPE html>
-<html>
-
+<!doctype html>
+<html lang="en">
 <head>
-
-    <title>HashGuard Dashboard</title>
-
-    <meta http-equiv="refresh" content="5">
-
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dashboard | HashGuard</title>
+    <link rel="icon" href="{{ url_for('favicon') }}" type="image/svg+xml">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-
 </head>
+<body class="app-page">
+    <main class="app-shell">
+        <header class="app-header">
+            <a class="app-brand" href="{{ url_for('dashboard') }}">
+                <span class="brand-mark" aria-hidden="true">#</span>
+                <span><strong>HashGuard</strong><small>File integrity monitoring</small></span>
+            </a>
+            <nav class="app-nav" aria-label="Main navigation">
+                <a class="active" href="{{ url_for('dashboard') }}">Dashboard</a>
+                <a href="{{ url_for('history') }}">Event history</a>
+                <a href="{{ url_for('analytics') }}">Analytics</a>
+                <a href="{{ url_for('download_report') }}">Download report</a>
+                <a href="{{ url_for('settings') }}">Settings</a>
+                <form method="POST" action="{{ url_for('logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="nav-button" type="submit">Sign out</button>
+                </form>
+            </nav>
+        </header>
 
-<body>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, message in messages %}
+                <div class="app-notice {{ category }}" role="status">{{ message }}</div>
+            {% endfor %}
+        {% endwith %}
 
-    <h1>HashGuard Security Dashboard</h1>
-
-    <a href="/download-report">
-        <button>Download JSON Report</button>
-    </a>
-
-    <a href="/download-pdf">
-        <button>Download PDF Report</button>
-    </a>
-
-    <a href="/download-csv">
-        <button>Download CSV Report</button>
-    </a>
-
-    <a href="/update-baseline">
-        <button>Update Baseline</button>
-    </a>
-
-    <a href="/history">
-        <button>View Event History</button>
-    </a>
-
-    <a href="/analytics">
-        <button>View Analytics</button>
-    </a>
-
-    <a href="/logout">
-        <button>Logout</button>
-    </a>
-
-    <br><br>
-
-    {% if alerts %}
-
-        <h2>Active Security Alerts</h2>
-
-        {% for alert in alerts %}
-
-            <div class="alert-box">
-
-                {{ alert }}
-
+        <section class="page-heading">
+            <div>
+                <p class="eyebrow">SECURITY OVERVIEW</p>
+                <h1>Dashboard</h1>
+                <p class="muted">A live view of integrity checks and recorded events.</p>
             </div>
+            <a class="button button-secondary" href="{{ url_for('dashboard') }}">Run scan &amp; refresh</a>
+        </section>
 
-        {% endfor %}
+        <section class="metric-grid" aria-label="Event summary">
+            <article class="metric-card">
+                <span>Total events</span>
+                <strong>{{ summary.total_events }}</strong>
+            </article>
+            <article class="metric-card">
+                <span>Open events</span>
+                <strong>{{ summary.open_events }}</strong>
+            </article>
+            <article class="metric-card">
+                <span>Critical events</span>
+                <strong>{{ summary.critical_events }}</strong>
+            </article>
+            <article class="metric-card">
+                <span>Most targeted file</span>
+                <strong class="metric-text">{{ top_file[0] if top_file else "—" }}</strong>
+                {% if top_file %}<small>{{ top_file[1] }} recorded event{{ "" if top_file[1] == 1 else "s" }}</small>{% endif %}
+            </article>
+        </section>
 
-    {% else %}
+        <section class="content-panel">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">INTEGRITY CHECK</p>
+                    <h2>Current scan</h2>
+                </div>
+                <form method="POST" action="{{ url_for('update_baseline') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="button button-secondary" type="submit">Update baseline</button>
+                </form>
+            </div>
+            {% if scan_error %}
+                <p class="app-notice error" role="alert">{{ scan_error }}</p>
+            {% elif alerts %}
+                <ul class="alert-list">
+                    {% for alert in alerts %}
+                        <li>{{ alert }}</li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="empty-state">No integrity changes detected in this scan.</p>
+            {% endif %}
+        </section>
 
-        <p class="safe">
-
-            No integrity violations detected.
-
-        </p>
-
-    {% endif %}
-
+        <section class="content-panel">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">DATABASE ACTIVITY</p>
+                    <h2>Recent events</h2>
+                </div>
+                <a class="text-link" href="{{ url_for('history') }}">View all events <span aria-hidden="true">→</span></a>
+            </div>
+            {% if recent_events %}
+                <div class="table-wrap">
+                    <table class="data-table">
+                        <thead>
+                            <tr><th>Time</th><th>Severity</th><th>Event</th><th>File</th><th>Status</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for event in recent_events %}
+                                <tr>
+                                    <td>{{ event[0] }}</td>
+                                    <td><span class="severity-badge severity-{{ event[1]|lower }}">{{ event[1] }}</span></td>
+                                    <td>{{ event[2] }}</td>
+                                    <td class="file-cell">{{ event[3] }}</td>
+                                    <td><span class="status-badge status-{{ event[4]|replace('_', '-') }}">{{ event[4]|replace('_', ' ') }}</span></td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty-state">No events have been recorded yet.</p>
+            {% endif %}
+        </section>
+    </main>
 </body>
-
 </html>

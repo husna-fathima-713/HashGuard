@@ -1,121 +1,74 @@
-<!DOCTYPE html>
-<html>
-
+<!doctype html>
+<html lang="en">
 <head>
-
-    <title>Security Analytics</title>
-
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-    <link rel="stylesheet"
-          href="{{ url_for('static', filename='style.css') }}">
-
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Analytics | HashGuard</title>
+    <link rel="icon" href="{{ url_for('favicon') }}" type="image/svg+xml">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
+<body class="app-page">
+    <main class="app-shell">
+        <header class="app-header">
+            <a class="app-brand" href="{{ url_for('dashboard') }}">
+                <span class="brand-mark" aria-hidden="true">#</span>
+                <span><strong>HashGuard</strong><small>File integrity monitoring</small></span>
+            </a>
+            <nav class="app-nav" aria-label="Main navigation">
+                <a href="{{ url_for('dashboard') }}">Dashboard</a>
+                <a href="{{ url_for('history') }}">Event history</a>
+                <a class="active" href="{{ url_for('analytics') }}">Analytics</a>
+                <a href="{{ url_for('download_report') }}">Download report</a>
+                <a href="{{ url_for('settings') }}">Settings</a>
+                <form method="POST" action="{{ url_for('logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="nav-button" type="submit">Sign out</button>
+                </form>
+            </nav>
+        </header>
 
-<body>
+        <section class="page-heading">
+            <div>
+                <p class="eyebrow">EVENT TRENDS</p>
+                <h1>Analytics</h1>
+                <p class="muted">Severity distribution from the event database.</p>
+            </div>
+            <a class="button button-secondary" href="{{ url_for('history') }}">Review events</a>
+        </section>
 
-    <h1>Security Analytics Dashboard</h1>
+        <section class="metric-grid" aria-label="Event totals">
+            <article class="metric-card"><span>Total events</span><strong>{{ summary.total_events }}</strong></article>
+            <article class="metric-card"><span>Open events</span><strong>{{ summary.open_events }}</strong></article>
+            <article class="metric-card"><span>Critical events</span><strong>{{ summary.critical_events }}</strong></article>
+            <article class="metric-card">
+                <span>Most targeted file</span>
+                <strong class="metric-text">{{ top_file[0] if top_file else "—" }}</strong>
+                {% if top_file %}<small>{{ top_file[1] }} recorded event{{ "" if top_file[1] == 1 else "s" }}</small>{% endif %}
+            </article>
+        </section>
 
-    <a href="/">
-        <button>Back to Dashboard</button>
-    </a>
-
-    <br><br>
-
-    <h2>Event Statistics</h2>
-
-    <table border="1">
-
-        <tr>
-            <th>Severity</th>
-            <th>Total Events</th>
-        </tr>
-
-        {% for stat in stats %}
-
-        <tr>
-
-            <td>{{ stat[0] }}</td>
-            <td>{{ stat[1] }}</td>
-
-        </tr>
-
-        {% endfor %}
-
-    </table>
-
-    <br>
-
-    <h2>Most Targeted File</h2>
-
-    {% if top_file %}
-
-        <p>
-            <strong>{{ top_file[0] }}</strong>
-            ({{ top_file[1] }} alerts)
-        </p>
-
-    {% else %}
-
-        <p>No events recorded yet.</p>
-
-    {% endif %}
-
-    <hr>
-
-    <h2>Severity Distribution</h2>
-
-    <canvas id="severityChart"></canvas>
-
-    <br><br>
-
-    <h2>Severity Pie Chart</h2>
-
-    <canvas id="severityPie"></canvas>
-
-    <script>
-
-        const labels = [
-            {% for stat in stats %}
-                "{{ stat[0] }}",
-            {% endfor %}
-        ];
-
-        const values = [
-            {% for stat in stats %}
-                {{ stat[1] }},
-            {% endfor %}
-        ];
-
-        new Chart(
-            document.getElementById('severityChart'),
-            {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Security Events',
-                        data: values
-                    }]
-                }
-            }
-        );
-
-        new Chart(
-            document.getElementById('severityPie'),
-            {
-                type: 'pie',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        data: values
-                    }]
-                }
-            }
-        );
-
-    </script>
-
+        <section class="content-panel">
+            <div class="section-heading">
+                <div><p class="eyebrow">BREAKDOWN</p><h2>Events by severity</h2></div>
+            </div>
+            {% if severity_stats %}
+                <div class="severity-chart" role="list" aria-label="Severity event counts">
+                    {% for item in severity_stats %}
+                        <div class="chart-row" role="listitem">
+                            <div class="chart-label">
+                                <span class="severity-badge severity-{{ item.severity|lower }}">{{ item.severity }}</span>
+                                <strong>{{ item.count }}</strong>
+                            </div>
+                            <div class="chart-track" role="img" aria-label="{{ item.count }} {{ item.severity }} events">
+                                <span class="chart-bar severity-bar-{{ item.severity|lower }}" style="width: {{ item.percentage }}%"></span>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="empty-state">No events are available to chart yet.</p>
+            {% endif %}
+        </section>
+    </main>
 </body>
-
 </html>

@@ -1,60 +1,79 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
-
-    <title>Register</title>
-
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#080d16">
+    <title>Create account | HashGuard</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('favicon') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 
-<body>
+<body class="auth-page">
+    <main class="auth-card" aria-labelledby="brand-title">
+        <header class="auth-header">
+            <svg class="auth-logo" viewBox="0 0 48 48" role="img" aria-labelledby="logo-title">
+                <title id="logo-title">HashGuard shield</title>
+                <path d="M24 4 41 11v12c0 11.4-7.1 18.5-17 22C14.1 41.5 7 34.4 7 23V11l17-7Z"
+                      fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
+                <path d="m16.5 24.5 5 5 10.5-11" fill="none" stroke="currentColor"
+                      stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <h1 id="brand-title">HashGuard</h1>
+            <p class="auth-tagline">File integrity monitoring</p>
+        </header>
 
-    <h1>Create Account</h1>
+        <section class="auth-content" aria-labelledby="register-heading">
+            {% if registration_disabled %}
+                <h2 id="register-heading">Registration unavailable</h2>
+                <p class="auth-intro" role="status">New account registration is disabled for this workspace.</p>
+                <p class="auth-register"><a href="{{ url_for('login') }}">Return to sign in</a></p>
+            {% else %}
+                <h2 id="register-heading">Create your account</h2>
+                <p class="auth-intro">Set up access to your security monitoring dashboard.</p>
 
-    <form method="POST">
+                {% if error %}
+                    <p class="auth-error" role="alert">{{ error }}</p>
+                {% endif %}
 
-        <input
-            type="text"
-            name="username"
-            placeholder="Username"
-            required>
+                <form class="auth-form" method="POST" action="{{ url_for('register') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-        <br><br>
+                    <div class="auth-field">
+                        <label for="username">Username</label>
+                        <input
+                            id="username"
+                            type="text"
+                            name="username"
+                            placeholder="Choose a username"
+                            autocomplete="username"
+                            required>
+                    </div>
 
-        <input
-            type="password"
-            name="password"
-            placeholder="Password"
-            required>
+                    <div class="auth-field">
+                        <label for="password">Password</label>
+                        <input
+                            id="password"
+                            type="password"
+                            name="password"
+                            placeholder="Create a password"
+                            autocomplete="new-password"
+                            required>
+                    </div>
 
-        <br><br>
+                    <button class="auth-submit" type="submit">Create account</button>
+                </form>
 
-        <button type="submit">
+                <p class="auth-register">
+                    Already have an account?
+                    <a href="{{ url_for('login') }}">Sign in</a>
+                </p>
+            {% endif %}
+        </section>
 
-            Register
-
-        </button>
-
-    </form>
-
-    <br>
-
-    <a href="/login">
-
-        Login
-
-    </a>
-
-    {% if error %}
-
-        <p style="color:red">
-
-            {{ error }}
-
-        </p>
-
-    {% endif %}
-
+        <footer class="auth-footer">Protected access for your monitoring workspace</footer>
+    </main>
 </body>
 
 </html>

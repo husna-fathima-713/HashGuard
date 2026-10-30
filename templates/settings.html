@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Settings | HashGuard</title>
+    <link rel="icon" href="{{ url_for('favicon') }}" type="image/svg+xml">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="app-page">
+    <main class="app-shell">
+        <header class="app-header">
+            <a class="app-brand" href="{{ url_for('dashboard') }}">
+                <span class="brand-mark" aria-hidden="true">#</span>
+                <span><strong>HashGuard</strong><small>File integrity monitoring</small></span>
+            </a>
+            <nav class="app-nav" aria-label="Main navigation">
+                <a href="{{ url_for('dashboard') }}">Dashboard</a>
+                <a href="{{ url_for('history') }}">Event history</a>
+                <a href="{{ url_for('analytics') }}">Analytics</a>
+                <a href="{{ url_for('download_report') }}">Download report</a>
+                <a class="active" href="{{ url_for('settings') }}">Settings</a>
+                <form method="POST" action="{{ url_for('logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="nav-button" type="submit">Sign out</button>
+                </form>
+            </nav>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, message in messages %}
+                <div class="app-notice {{ category }}" role="status">{{ message }}</div>
+            {% endfor %}
+        {% endwith %}
+
+        <section class="page-heading">
+            <div>
+                <p class="eyebrow">WORKSPACE CONFIGURATION</p>
+                <h1>Settings</h1>
+                <p class="muted">Choose where HashGuard sends critical security alerts.</p>
+            </div>
+        </section>
+
+        <section class="content-panel settings-panel">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">EMAIL NOTIFICATIONS</p>
+                    <h2>Alert recipient</h2>
+                </div>
+                {% if ready %}
+                    <span class="status-badge status-resolved">Email alerts ready</span>
+                {% else %}
+                    <span class="status-badge status-acknowledged">Email setup incomplete</span>
+                {% endif %}
+            </div>
+
+            {% if email_error %}
+                <p class="settings-error" role="alert">{{ email_error }}</p>
+            {% endif %}
+
+            <form class="settings-form" method="POST" action="{{ url_for('settings') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label for="alert-recipient">Send critical alerts to</label>
+                <input
+                    id="alert-recipient"
+                    type="email"
+                    name="alert_recipient"
+                    value="{{ alert_recipient }}"
+                    maxlength="254"
+                    autocomplete="email"
+                    placeholder="security@example.com">
+                <p class="settings-help">
+                    This address is saved in the local database and used for new critical alerts.
+                    Leave it blank and save to fall back to <code>TO_EMAIL</code> in your
+                    project <code>.env</code>.
+                </p>
+                <button class="button button-primary" type="submit">Save recipient</button>
+            </form>
+
+            {% if not ready %}
+                <p class="settings-help settings-status-message" role="status">
+                    {{ message }}
+                </p>
+            {% endif %}
+
+            <form class="settings-test-form" method="POST" action="{{ url_for('test_email_settings') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="button button-secondary" type="submit" {% if not ready %}disabled{% endif %}>
+                    Send test email
+                </button>
+                <span class="settings-help">Save the recipient first. Test messages count toward a 3-per-hour limit.</span>
+            </form>
+
+            <div class="settings-note">
+                <strong>Sender credentials stay on the server.</strong>
+                <p>
+                    Configure <code>EMAIL_ADDRESS</code>, <code>EMAIL_PASSWORD</code>,
+                    and optionally <code>SMTP_HOST</code>/<code>SMTP_PORT</code> in the
+                    project <code>.env</code>. For Gmail, use an App Password.
+                    Restart HashGuard after changing `.env`.
+                    HashGuard emails critical alerts when the scanner records them;
+                    deduplication and the alert cooldown can suppress repeats.
+                </p>
+            </div>
+        </section>
+    </main>
+</body>
+</html>

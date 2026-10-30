@@ -1,60 +1,125 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
-
-    <title>HashGuard Login</title>
-
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#080d16">
+    <title>Sign in | HashGuard</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('favicon') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 
-<body>
+<body class="auth-page">
+    <main class="auth-card" aria-labelledby="brand-title">
+        <header class="auth-header">
+            <svg class="auth-logo" viewBox="0 0 48 48" role="img" aria-labelledby="logo-title">
+                <title id="logo-title">HashGuard shield</title>
+                <path d="M24 4 41 11v12c0 11.4-7.1 18.5-17 22C14.1 41.5 7 34.4 7 23V11l17-7Z"
+                      fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
+                <path d="m16.5 24.5 5 5 10.5-11" fill="none" stroke="currentColor"
+                      stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <h1 id="brand-title">HashGuard</h1>
+            <p class="auth-tagline">File integrity monitoring</p>
+        </header>
 
-    <h1>HashGuard Login</h1>
+        <section class="auth-content" aria-labelledby="login-heading">
+            <h2 id="login-heading">Welcome back</h2>
+            <p class="auth-intro">Sign in to access your security dashboard.</p>
 
-    <form method="POST">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% for category, message in messages %}
+                    <p class="auth-success" role="status">{{ message }}</p>
+                {% endfor %}
+            {% endwith %}
 
-        <input
-            type="text"
-            name="username"
-            placeholder="Username"
-            required>
+            {% if error %}
+                <p class="auth-error" role="alert">{{ error }}</p>
+            {% endif %}
 
-        <br><br>
+            <form class="auth-form" method="POST" action="{{ url_for('login') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-        <input
-            type="password"
-            name="password"
-            placeholder="Password"
-            required>
+                <div class="auth-field">
+                    <label for="username">Username</label>
+                    <input
+                        id="username"
+                        type="text"
+                        name="username"
+                        placeholder="Enter your username"
+                        autocomplete="username"
+                        required>
+                </div>
 
-        <br><br>
+                <div class="auth-field">
+                    <label for="password">Password</label>
+                    <div class="password-control">
+                        <input
+                            id="password"
+                            type="password"
+                            name="password"
+                            placeholder="Enter your password"
+                            autocomplete="current-password"
+                            required>
+                        <button
+                            class="password-toggle"
+                            id="password-toggle"
+                            type="button"
+                            aria-label="Show password"
+                            aria-pressed="false"
+                            aria-controls="password">Show</button>
+                    </div>
+                </div>
 
-        <button type="submit">
+                <button class="auth-submit" id="login-submit" type="submit">
+                    <span class="submit-label">Sign in</span>
+                    <span class="submit-progress" aria-hidden="true"></span>
+                </button>
+            </form>
 
-            Login
+            {% if show_register_link %}
+                <p class="auth-register">
+                    Need an account?
+                    <a href="{{ url_for('register') }}">Register</a>
+                </p>
+            {% endif %}
+        </section>
 
-        </button>
+        <footer class="auth-footer">Protected access for your monitoring workspace</footer>
+    </main>
 
-    </form>
+    <script>
+        (() => {
+            const passwordInput = document.getElementById("password");
+            const passwordToggle = document.getElementById("password-toggle");
+            const loginForm = document.querySelector(".auth-form");
+            const submitButton = document.getElementById("login-submit");
+            const submitLabel = submitButton.querySelector(".submit-label");
 
-    <br>
+            passwordToggle.addEventListener("click", () => {
+                const isVisible = passwordInput.type === "text";
+                passwordInput.type = isVisible ? "password" : "text";
+                passwordToggle.setAttribute("aria-pressed", String(!isVisible));
+                passwordToggle.setAttribute(
+                    "aria-label",
+                    isVisible ? "Show password" : "Hide password"
+                );
+                passwordToggle.textContent = isVisible ? "Show" : "Hide";
+            });
 
-    <a href="/register">
+            loginForm.addEventListener("submit", (event) => {
+                if (submitButton.disabled) {
+                    event.preventDefault();
+                    return;
+                }
 
-        Create Account
-
-    </a>
-
-    {% if error %}
-
-        <p style="color:red;">
-
-            {{ error }}
-
-        </p>
-
-    {% endif %}
-
+                submitButton.disabled = true;
+                submitButton.setAttribute("aria-busy", "true");
+                submitLabel.textContent = "Signing in...";
+            });
+        })();
+    </script>
 </body>
 
 </html>
