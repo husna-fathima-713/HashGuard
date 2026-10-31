@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#080d16">
     <title>Sign in | HashGuard</title>
-    <link rel="icon" type="image/svg+xml" href="{{ url_for('favicon') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('web.favicon') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 
@@ -38,7 +38,7 @@
                 <p class="auth-error" role="alert">{{ error }}</p>
             {% endif %}
 
-            <form class="auth-form" method="POST" action="{{ url_for('login') }}">
+            <form class="auth-form" method="POST" action="{{ url_for('web.login') }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
                 <div class="auth-field">
@@ -81,7 +81,7 @@
             {% if show_register_link %}
                 <p class="auth-register">
                     Need an account?
-                    <a href="{{ url_for('register') }}">Register</a>
+                    <a href="{{ url_for('web.register') }}">Register</a>
                 </p>
             {% endif %}
         </section>

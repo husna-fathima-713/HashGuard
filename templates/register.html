@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#080d16">
     <title>Create account | HashGuard</title>
-    <link rel="icon" type="image/svg+xml" href="{{ url_for('favicon') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('web.favicon') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 
@@ -28,7 +28,7 @@
             {% if registration_disabled %}
                 <h2 id="register-heading">Registration unavailable</h2>
                 <p class="auth-intro" role="status">New account registration is disabled for this workspace.</p>
-                <p class="auth-register"><a href="{{ url_for('login') }}">Return to sign in</a></p>
+                <p class="auth-register"><a href="{{ url_for('web.login') }}">Return to sign in</a></p>
             {% else %}
                 <h2 id="register-heading">Create your account</h2>
                 <p class="auth-intro">Set up access to your security monitoring dashboard.</p>
@@ -37,7 +37,7 @@
                     <p class="auth-error" role="alert">{{ error }}</p>
                 {% endif %}
 
-                <form class="auth-form" method="POST" action="{{ url_for('register') }}">
+                <form class="auth-form" method="POST" action="{{ url_for('web.register') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
                     <div class="auth-field">
@@ -67,7 +67,7 @@
 
                 <p class="auth-register">
                     Already have an account?
-                    <a href="{{ url_for('login') }}">Sign in</a>
+                    <a href="{{ url_for('web.login') }}">Sign in</a>
                 </p>
             {% endif %}
         </section>

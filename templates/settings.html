@@ -4,23 +4,23 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Settings | HashGuard</title>
-    <link rel="icon" href="{{ url_for('favicon') }}" type="image/svg+xml">
+    <link rel="icon" href="{{ url_for('web.favicon') }}" type="image/svg+xml">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body class="app-page">
     <main class="app-shell">
         <header class="app-header">
-            <a class="app-brand" href="{{ url_for('dashboard') }}">
+            <a class="app-brand" href="{{ url_for('web.dashboard') }}">
                 <span class="brand-mark" aria-hidden="true">#</span>
                 <span><strong>HashGuard</strong><small>File integrity monitoring</small></span>
             </a>
             <nav class="app-nav" aria-label="Main navigation">
-                <a href="{{ url_for('dashboard') }}">Dashboard</a>
-                <a href="{{ url_for('history') }}">Event history</a>
-                <a href="{{ url_for('analytics') }}">Analytics</a>
-                <a href="{{ url_for('download_report') }}">Download report</a>
-                <a class="active" href="{{ url_for('settings') }}">Settings</a>
-                <form method="POST" action="{{ url_for('logout') }}">
+                <a href="{{ url_for('web.dashboard') }}">Dashboard</a>
+                <a href="{{ url_for('web.history') }}">Event history</a>
+                <a href="{{ url_for('web.analytics') }}">Analytics</a>
+                <a href="{{ url_for('web.download_report') }}">Download report</a>
+                <a class="active" href="{{ url_for('web.settings') }}">Settings</a>
+                <form method="POST" action="{{ url_for('web.logout') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button class="nav-button" type="submit">Sign out</button>
                 </form>
@@ -37,8 +37,45 @@
             <div>
                 <p class="eyebrow">WORKSPACE CONFIGURATION</p>
                 <h1>Settings</h1>
-                <p class="muted">Choose where HashGuard sends critical security alerts.</p>
+                <p class="muted">Configure scan behavior and critical security alerts.</p>
             </div>
+        </section>
+
+        <section class="content-panel settings-panel">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">INTEGRITY SCANNING</p>
+                    <h2>Scan schedule and folder</h2>
+                </div>
+            </div>
+            {% if scan_error %}
+                <p class="settings-error" role="alert">{{ scan_error }}</p>
+            {% endif %}
+            <form class="settings-form" method="POST" action="{{ url_for('web.update_scan_settings') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label for="scan-interval">Scan interval (seconds)</label>
+                <input
+                    id="scan-interval"
+                    type="number"
+                    name="scan_interval_seconds"
+                    min="1"
+                    step="1"
+                    required
+                    value="{{ scan_interval_seconds }}">
+                <label for="watched-folder">Watched folder</label>
+                <input
+                    id="watched-folder"
+                    type="text"
+                    name="watched_folder"
+                    required
+                    value="{{ watched_folder }}"
+                    autocomplete="off">
+                <p class="settings-help">
+                    The folder must already exist and remain inside the configured scan root:
+                    <code>{{ config["SCAN_ROOT"] }}</code>.
+                </p>
+                <button class="button button-primary" type="submit">Save scan settings</button>
+            </form>
         </section>
 
         <section class="content-panel settings-panel">
@@ -58,7 +95,7 @@
                 <p class="settings-error" role="alert">{{ email_error }}</p>
             {% endif %}
 
-            <form class="settings-form" method="POST" action="{{ url_for('settings') }}">
+            <form class="settings-form" method="POST" action="{{ url_for('web.settings') }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <label for="alert-recipient">Send critical alerts to</label>
                 <input
@@ -83,7 +120,7 @@
                 </p>
             {% endif %}
 
-            <form class="settings-test-form" method="POST" action="{{ url_for('test_email_settings') }}">
+            <form class="settings-test-form" method="POST" action="{{ url_for('web.test_email_settings') }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button class="button button-secondary" type="submit" {% if not ready %}disabled{% endif %}>
                     Send test email
