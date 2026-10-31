@@ -1,29 +1,33 @@
+"""Flask application routes and startup configuration for HashGuard."""
+
 from flask import (
     Flask,
+    Blueprint,
+    current_app,
     flash,
     render_template,
     send_file,
     request,
     redirect,
+    Response,
     session,
     url_for
 )
 import sqlite3
-from apscheduler.schedulers.background import BackgroundScheduler
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
-from flask_wtf.csrf import CSRFProtect
-from dotenv import load_dotenv
-
 import json
 import os
 import csv
 import io
-import secrets
-from threading import Lock
 from datetime import datetime, timezone
+from pathlib import Path
+from collections.abc import Mapping
+from typing import TypeAlias
 
-from src.monitor import check_integrity, create_baseline, write_log
+from src.monitor import (
+    check_integrity,
+    create_baseline,
+    write_log,
+)
 from src.email_alert import (
     get_alert_recipient,
     get_email_configuration_status,
@@ -31,9 +35,13 @@ from src.email_alert import (
     send_email_alert,
 )
 from src import database as database_module
+from src.config import AppConfig, load_config
+from src.event_status import EVENT_STATUSES, EventStatus
+from src.extensions import csrf, limiter
+from src.logging_setup import configure_app_logger, configure_logging
+from src.scan_settings import get_scan_settings, save_scan_settings
 
 from src.database import (
-    initialize_database,
     get_all_events,
     get_event_statistics,
     get_event_summary,
@@ -44,127 +52,68 @@ from src.database import (
     search_events,
     filter_events as filter_event_records,
     register_user,
+    register_first_user,
     verify_user,
     update_event_status
 )
 
 from src.pdf_report import generate_pdf_report
 
-load_dotenv()
+RouteResult: TypeAlias = str | Response | tuple[str, int]
 
-app = Flask(__name__)
-
-DEBUG = os.getenv("FLASK_DEBUG", "").strip().lower() in {
-    "1",
-    "true",
-    "yes",
-    "on"
-}
-
-def _get_secret_key():
-
-    secret_key = os.getenv("SECRET_KEY")
-
-    if secret_key and secret_key.strip() == "replace_with_a_long_random_secret":
-
-        raise RuntimeError(
-            "SECRET_KEY must be replaced with a unique, random secret."
-        )
-
-    if not secret_key and not DEBUG:
-
-        raise RuntimeError(
-            "SECRET_KEY must be set when FLASK_DEBUG is false."
-        )
-
-    return secret_key or secrets.token_hex(32)
+web = Blueprint("web", __name__)
 
 
-SECRET_KEY = _get_secret_key()
+def create_app(config: AppConfig | Mapping[str, object] | None = None) -> Flask:
+    app = Flask(__name__)
+    app_config = load_config(config)
+    app.config.from_mapping(app_config.to_flask_config())
+    if isinstance(config, Mapping):
+        extra_config = {
+            key: value
+            for key, value in config.items()
+            if key not in app_config.to_flask_config()
+        }
+        app.config.update(extra_config)
 
-app.config.update(
-    SECRET_KEY=SECRET_KEY,
-    DEBUG=DEBUG,
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=os.getenv(
-        "SESSION_COOKIE_SECURE",
-        "false"
-    ).strip().lower() in {"1", "true", "yes", "on"}
-)
+    configure_logging(app.config["LOGS_DIR"])
+    configure_app_logger(app)
 
-csrf = CSRFProtect(app)
-limiter = Limiter(
-    get_remote_address,
-    app=app,
-    default_limits=[]
-)
-scheduler = None
-_database_initialization_lock = Lock()
-_initialized_database_path = None
+    with app.app_context():
+        database_module.initialize_database()
 
+    limiter.init_app(app)
+    csrf.init_app(app)
+    app.before_request(require_authentication)
+    app.extensions["hashguard.config"] = app_config
 
-def _run_scheduled_scan():
+    with app.app_context():
+        from src.monitor import validate_monitor_configuration
 
-    try:
+        validate_monitor_configuration()
 
-        with app.app_context():
-
-            check_integrity()
-
-    except Exception:
-
-        app.logger.exception("Scheduled integrity scan failed")
-
-
-def start_background_scanner():
-
-    global scheduler
-
-    if DEBUG and os.getenv("WERKZEUG_RUN_MAIN") != "true":
-
-        return None
-
-    if scheduler is not None and scheduler.running:
-
-        return scheduler
-
-    try:
-
-        interval_seconds = int(os.getenv("SCAN_INTERVAL_SECONDS", "300"))
-
-    except ValueError as error:
-
-        raise ValueError(
-            "SCAN_INTERVAL_SECONDS must be a positive integer."
-        ) from error
-
-    if interval_seconds <= 0:
-
-        raise ValueError("SCAN_INTERVAL_SECONDS must be a positive integer.")
-
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(
-        _run_scheduled_scan,
-        "interval",
-        seconds=interval_seconds,
-        id="hashguard-integrity-scan",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True
+    app.register_blueprint(web)
+    app.context_processor(
+        lambda: {"event_statuses": EVENT_STATUSES}
     )
-    scheduler.start()
+    app.register_error_handler(500, _internal_server_error)
+    return app
 
-    return scheduler
+
+def _internal_server_error(error: Exception) -> tuple[str, int]:
+    current_app.logger.error(
+        "Unhandled application error",
+        exc_info=(type(error), error, error.__traceback__),
+    )
+    return "An internal error occurred.", 500
 
 
-@app.before_request
-def require_authentication():
+def require_authentication() -> Response | None:
 
     if request.endpoint in {
-        "login",
-        "register",
-        "favicon",
+        "web.login",
+        "web.register",
+        "web.favicon",
         "static",
         None
     }:
@@ -176,57 +125,32 @@ def require_authentication():
         return redirect("/login")
 
 
-@app.before_request
-def ensure_database_initialized():
-
-    global _initialized_database_path
-
-    if request.endpoint in {"static", "favicon", None}:
-
-        return None
-
-    database_path = os.path.abspath(os.fspath(database_module.DB_PATH))
-
-    if _initialized_database_path == database_path:
-
-        return None
-
-    with _database_initialization_lock:
-
-        if _initialized_database_path != database_path:
-
-            initialize_database()
-            _initialized_database_path = database_path
-
-    return None
-
-
-
-
-
-@app.route("/favicon.svg")
-def favicon():
+@web.route("/favicon.svg")
+def favicon() -> Response:
 
     return send_file(
-        os.path.join(app.root_path, "static", "favicon.svg"),
+        os.path.join(current_app.root_path, "static", "favicon.svg"),
         mimetype="image/svg+xml"
     )
 
 
-def registration_allowed():
+def registration_allowed() -> bool:
 
-    env_value = os.getenv("ALLOW_REGISTRATION", "false")
-
-    if str(env_value).strip().lower() in {"1", "true", "yes", "on"}:
+    if registration_is_unrestricted():
 
         return True
 
     return count_users() == 0
 
 
-@app.route("/login", methods=["GET", "POST"])
+def registration_is_unrestricted() -> bool:
+
+    return bool(current_app.config["ALLOW_REGISTRATION"])
+
+
+@web.route("/login", methods=["GET", "POST"])
 @limiter.limit("5 per minute", methods=["POST"])
-def login():
+def login() -> RouteResult:
 
     show_register_link = registration_allowed()
 
@@ -238,6 +162,7 @@ def login():
 
         if username and password and verify_user(username, password):
 
+            session.clear()
             session["logged_in"] = True
 
             session["username"] = username
@@ -256,9 +181,9 @@ def login():
     )
 
 
-@app.route("/register", methods=["GET", "POST"])
+@web.route("/register", methods=["GET", "POST"])
 @limiter.limit("5 per hour", methods=["POST"])
-def register():
+def register() -> RouteResult:
 
     if not registration_allowed():
 
@@ -282,10 +207,20 @@ def register():
 
         try:
 
-            success = register_user(
-                username,
-                password
-            )
+            if registration_is_unrestricted():
+
+                success = register_user(username, password)
+
+            else:
+
+                success = register_first_user(username, password)
+
+                if not success:
+
+                    return render_template(
+                        "register.html",
+                        registration_disabled=True
+                    ), 403
 
         except sqlite3.Error:
 
@@ -307,8 +242,8 @@ def register():
     return render_template("register.html")
 
 
-@app.route("/logout", methods=["POST"])
-def logout():
+@web.route("/logout", methods=["POST"])
+def logout() -> RouteResult:
 
     if not session.get("logged_in"):
 
@@ -319,46 +254,53 @@ def logout():
     return redirect("/login")
 
 
-@app.route("/")
-def dashboard():
+@web.route("/")
+def dashboard() -> RouteResult:
 
     if not session.get("logged_in"):
 
         return redirect("/login")
 
-    scan_error = None
-
-    try:
-
-        alerts = check_integrity()
-
-    except OSError:
-
-        app.logger.exception("Dashboard integrity scan failed.")
-        alerts = []
-        scan_error = (
-            "Integrity scan failed. Check the watched directory and its "
-            "permissions; no scan results are available."
-        )
-
     events = get_all_events()
 
     return render_template(
         "index.html",
-        alerts=alerts,
-        scan_error=scan_error,
+        baseline_exists=Path(current_app.config["BASELINE_FILE"]).is_file(),
         summary=get_event_summary(),
         top_file=get_most_targeted_file(),
         recent_events=events[:8]
     )
 
 
-def _build_report_data(alerts, events=None):
+@web.route("/scan", methods=["POST"])
+@limiter.limit("5 per hour", methods=["POST"])
+def scan_now() -> Response:
+    try:
+        alerts = check_integrity()
+    except (OSError, ValueError):
+        current_app.logger.exception("Manual integrity scan failed.")
+        flash("Integrity scan failed. Check settings and server logs.", "error")
+    else:
+        flash(
+            f"Integrity scan completed; {len(alerts)} finding(s) returned.",
+            "success",
+        )
+    return redirect(url_for("web.dashboard"))
+
+
+def _build_report_data(
+    events: list[tuple[object, ...]] | None = None,
+) -> dict[str, object]:
 
     if events is None:
 
         events = get_all_events()
 
+    alerts = [
+        f"[{event[1]}] {event[2]}: {event[3]}"
+        for event in events
+        if event[4] == EventStatus.OPEN.value
+    ]
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "total_alerts": len(alerts),
@@ -381,36 +323,14 @@ def _build_report_data(alerts, events=None):
     }
 
 
-def _save_security_report(report_data):
-
-    os.makedirs("reports", exist_ok=True)
-    report_path = os.path.join("reports", "security_report.json")
-
-    with open(report_path, "w", encoding="utf-8") as report:
-
-        json.dump(report_data, report, indent=4, ensure_ascii=False)
-
-    return report_path
-
-
-@app.route("/download-report")
-def download_report():
+@web.route("/download-report")
+def download_report() -> RouteResult:
 
     if not session.get("logged_in"):
 
         return redirect("/login")
 
-    try:
-
-        alerts = check_integrity()
-
-    except OSError:
-
-        app.logger.exception("JSON report integrity scan failed.")
-        return "Integrity scan failed; report was not generated.", 503
-
-    report_data = _build_report_data(alerts)
-    _save_security_report(report_data)
+    report_data = _build_report_data()
 
     return send_file(
         io.BytesIO(
@@ -422,8 +342,8 @@ def download_report():
     )
 
 
-@app.route("/download-pdf")
-def download_pdf():
+@web.route("/download-pdf")
+def download_pdf() -> Response:
 
     if not session.get("logged_in"):
 
@@ -434,8 +354,9 @@ def download_pdf():
     top_file = get_most_targeted_file()
     events = get_all_events()
 
-    os.makedirs("reports", exist_ok=True)
-    pdf_path = "reports/HashGuard_Security_Report.pdf"
+    reports_dir = current_app.config["REPORTS_DIR"]
+    os.makedirs(reports_dir, exist_ok=True)
+    pdf_path = os.path.join(reports_dir, "HashGuard_Security_Report.pdf")
 
     generate_pdf_report(
         pdf_path,
@@ -450,8 +371,8 @@ def download_pdf():
     )
 
 
-@app.route("/download-csv")
-def download_csv():
+@web.route("/download-csv")
+def download_csv() -> Response:
 
     if not session.get("logged_in"):
 
@@ -459,9 +380,9 @@ def download_csv():
 
     events = get_all_events()
 
-    os.makedirs("reports", exist_ok=True)
-
-    csv_path = "reports/security_events.csv"
+    reports_dir = current_app.config["REPORTS_DIR"]
+    os.makedirs(reports_dir, exist_ok=True)
+    csv_path = os.path.join(reports_dir, "security_events.csv")
 
     with open(
         csv_path,
@@ -497,7 +418,7 @@ def download_csv():
     )
 
 
-def _spreadsheet_safe_csv_value(value):
+def _spreadsheet_safe_csv_value(value: object) -> object:
 
     if not isinstance(value, str):
 
@@ -513,8 +434,9 @@ def _spreadsheet_safe_csv_value(value):
     return value
 
 
-@app.route("/update-baseline", methods=["POST"])
-def update_baseline():
+@web.route("/update-baseline", methods=["POST"])
+@limiter.limit("5 per hour", methods=["POST"])
+def update_baseline() -> Response:
 
     if not session.get("logged_in"):
 
@@ -544,22 +466,22 @@ def update_baseline():
             details=details
         )
 
-    except OSError:
+    except (OSError, ValueError):
 
-        app.logger.exception("Baseline update failed.")
+        current_app.logger.exception("Baseline update failed.")
         flash(
             "Baseline update failed. Check filesystem permissions and server logs.",
             "error"
         )
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("web.dashboard"))
 
     flash("Baseline updated and audit event recorded.", "success")
 
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("web.dashboard"))
 
 
-@app.route("/history")
-def history():
+@web.route("/history")
+def history() -> RouteResult:
 
     if not session.get("logged_in"):
 
@@ -589,8 +511,8 @@ def history():
     )
 
 
-@app.route("/search")
-def search():
+@web.route("/search")
+def search() -> RouteResult:
 
     if not session.get("logged_in"):
 
@@ -614,8 +536,8 @@ def search():
     )
 
 
-@app.route("/filter")
-def filter_events():
+@web.route("/filter")
+def filter_events() -> RouteResult:
 
     if not session.get("logged_in"):
 
@@ -640,17 +562,13 @@ def filter_events():
     )
 
 
-@app.route("/update-event-status/<int:event_id>", methods=["POST"])
-def update_security_event_status(event_id):
+@web.route("/update-event-status/<int:event_id>", methods=["POST"])
+@limiter.limit("30 per minute", methods=["POST"])
+def update_security_event_status(event_id: int) -> RouteResult:
 
     status = request.form.get("status", "")
 
-    if status not in {
-        "open",
-        "acknowledged",
-        "resolved",
-        "false_positive"
-    }:
+    if status not in EVENT_STATUSES:
 
         return "Invalid event status.", 400
 
@@ -668,15 +586,15 @@ def update_security_event_status(event_id):
     flash("Event status updated.", "success")
 
     return redirect(url_for(
-        "history",
+        "web.history",
         filename=request.args.get("filename", ""),
         severity=request.args.get("severity", ""),
         status=request.args.get("status", "")
     ))
 
 
-@app.route("/analytics")
-def analytics():
+@web.route("/analytics")
+def analytics() -> RouteResult:
 
     if not session.get("logged_in"):
 
@@ -706,8 +624,9 @@ def analytics():
     )
 
 
-@app.route("/settings", methods=["GET", "POST"])
-def settings():
+@web.route("/settings", methods=["GET", "POST"])
+@limiter.limit("10 per hour", methods=["POST"])
+def settings() -> RouteResult:
 
     if request.method == "POST":
 
@@ -715,9 +634,12 @@ def settings():
 
         if recipient and not is_valid_email_address(recipient):
 
+            interval, folder = get_scan_settings()
             return render_template(
                 "settings.html",
                 alert_recipient=recipient,
+                scan_interval_seconds=interval,
+                watched_folder=folder,
                 email_error="Enter a valid email address.",
                 **get_email_configuration_status(recipient),
             ), 400
@@ -738,20 +660,49 @@ def settings():
                 "success"
             )
 
-        return redirect(url_for("settings"))
+        return redirect(url_for("web.settings"))
 
     recipient = get_alert_recipient()
+    interval, folder = get_scan_settings()
 
     return render_template(
         "settings.html",
         alert_recipient=recipient,
+        scan_interval_seconds=interval,
+        watched_folder=folder,
         **get_email_configuration_status(recipient),
     )
 
 
-@app.route("/settings/test-email", methods=["POST"])
+@web.route("/settings/scanning", methods=["POST"])
+@limiter.limit("5 per hour", methods=["POST"])
+def update_scan_settings() -> RouteResult:
+    interval_value = request.form.get("scan_interval_seconds", "")
+    folder_value = request.form.get("watched_folder", "").strip()
+    try:
+        interval, folder = save_scan_settings(interval_value, folder_value)
+    except ValueError as error:
+        recipient = get_alert_recipient()
+        return render_template(
+            "settings.html",
+            alert_recipient=recipient,
+            scan_interval_seconds=interval_value,
+            watched_folder=folder_value,
+            scan_error=str(error),
+            email_error=None,
+            **get_email_configuration_status(recipient),
+        ), 400
+
+    flash(
+        "Scanning settings saved. The scheduler will apply them on its next run.",
+        "success",
+    )
+    return redirect(url_for("web.settings"))
+
+
+@web.route("/settings/test-email", methods=["POST"])
 @limiter.limit("3 per hour", methods=["POST"])
-def test_email_settings():
+def test_email_settings() -> Response:
 
     recipient = get_alert_recipient()
 
@@ -761,14 +712,14 @@ def test_email_settings():
             "Save a valid alert recipient before sending a test email.",
             "error",
         )
-        return redirect(url_for("settings"))
+        return redirect(url_for("web.settings"))
 
     configuration = get_email_configuration_status(recipient)
 
     if not configuration["ready"]:
 
         flash(configuration["message"], "error")
-        return redirect(url_for("settings"))
+        return redirect(url_for("web.settings"))
 
     if send_email_alert("This is a HashGuard email delivery test."):
 
@@ -781,12 +732,9 @@ def test_email_settings():
             "error",
         )
 
-    return redirect(url_for("settings"))
+    return redirect(url_for("web.settings"))
 
 
 if __name__ == "__main__":
 
-    initialize_database()
-    start_background_scanner()
-
-    app.run(debug=DEBUG)
+    create_app().run()
