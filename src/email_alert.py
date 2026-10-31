@@ -1,22 +1,21 @@
+"""SMTP email notification helpers for HashGuard security alerts."""
+
 import logging
-import os
 import re
 import smtplib
 import ssl
 
-from dotenv import load_dotenv
 from email.mime.text import MIMEText
 
+from src.config import get_config_value
 from src.database import get_app_setting
-
-load_dotenv()
 
 ALERT_RECIPIENT_SETTING = "alert_recipient"
 EMAIL_ADDRESS_PATTERN = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 logger = logging.getLogger(__name__)
 
 
-def is_valid_email_address(address):
+def is_valid_email_address(address: str) -> bool:
 
     return (
         isinstance(address, str)
@@ -25,18 +24,20 @@ def is_valid_email_address(address):
     )
 
 
-def get_alert_recipient():
+def get_alert_recipient() -> str:
 
     saved_recipient = get_app_setting(ALERT_RECIPIENT_SETTING, "")
 
-    return saved_recipient.strip() or os.getenv("TO_EMAIL", "").strip()
+    return saved_recipient.strip() or str(get_config_value("TO_EMAIL", "")).strip()
 
 
-def get_email_configuration_status(recipient=None):
+def get_email_configuration_status(
+    recipient: str | None = None,
+) -> dict[str, bool | str]:
 
-    sender = os.getenv("EMAIL_ADDRESS", "").strip()
-    password = os.getenv("EMAIL_PASSWORD", "")
-    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
+    sender = str(get_config_value("EMAIL_ADDRESS", "")).strip()
+    password = str(get_config_value("EMAIL_PASSWORD", ""))
+    smtp_host = str(get_config_value("SMTP_HOST", "smtp.gmail.com")).strip()
     configured_recipient = (
         get_alert_recipient() if recipient is None else recipient.strip()
     )
@@ -59,7 +60,7 @@ def get_email_configuration_status(recipient=None):
 
     try:
 
-        smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        smtp_port = int(get_config_value("SMTP_PORT", 587))
 
     except ValueError:
 
@@ -78,7 +79,7 @@ def get_email_configuration_status(recipient=None):
     }
 
 
-def send_email_alert(message):
+def send_email_alert(message: str) -> bool:
 
     recipient = get_alert_recipient()
     configuration = get_email_configuration_status(recipient)
@@ -91,10 +92,10 @@ def send_email_alert(message):
         )
         return False
 
-    sender = os.getenv("EMAIL_ADDRESS", "").strip()
-    password = os.getenv("EMAIL_PASSWORD", "")
-    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    sender = str(get_config_value("EMAIL_ADDRESS", "")).strip()
+    password = str(get_config_value("EMAIL_PASSWORD", ""))
+    smtp_host = str(get_config_value("SMTP_HOST", "smtp.gmail.com")).strip()
+    smtp_port = int(get_config_value("SMTP_PORT", 587))
 
     msg = MIMEText(message, _charset="utf-8")
     msg["Subject"] = "HashGuard Critical Security Alert"

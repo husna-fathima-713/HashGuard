@@ -1,3 +1,5 @@
+"""Baseline management, integrity scans, and security event logging."""
+
 import hashlib
 import hmac
 import fnmatch
@@ -5,10 +7,19 @@ import json
 import logging
 import os
 import socket
+import stat
 import tempfile
 import threading
 from datetime import datetime, timezone
 
+from flask import current_app, has_app_context
+
+from src.config import (
+    DEFAULT_BASELINE_FILE,
+    DEFAULT_LOGS_DIR,
+    DEFAULT_SCAN_ROOT,
+    DEFAULT_WHITELIST_FILE,
+)
 from src.hasher import calculate_hash
 from src.email_alert import send_email_alert
 from src.database import (
@@ -16,18 +27,18 @@ from src.database import (
     save_event,
     should_record_alert
 )
+from src.logging_setup import append_rotating_log_file as _append_log_line
+from src.scan_settings import get_scan_settings
 
 
-WATCHED_FOLDER = "watched"
-BASELINE_FILE = "baseline/hashes.json"
-LOG_FILE = "logs/security.log"
-WHITELIST_FILE = "whitelist.json"
+WATCHED_FOLDER = DEFAULT_SCAN_ROOT
+BASELINE_FILE = DEFAULT_BASELINE_FILE
+LOG_FILE = os.path.join(DEFAULT_LOGS_DIR, "security.log")
+WHITELIST_FILE = DEFAULT_WHITELIST_FILE
 BASELINE_HMAC_KEY_ENV = "BASELINE_HMAC_KEY"
 ALERT_COOLDOWN_SECONDS_ENV = "ALERT_COOLDOWN_SECONDS"
-JSON_LOG_FILE = "logs/security.jsonl"
-SYSLOG_HOST_ENV = "SYSLOG_HOST"
-SYSLOG_PORT_ENV = "SYSLOG_PORT"
-SYSLOG_FACILITY_ENV = "SYSLOG_FACILITY"
+JSON_LOG_FILE = os.path.join(DEFAULT_LOGS_DIR, "security.jsonl")
+SCAN_PROGRESS_INTERVAL = 100
 SYSLOG_FACILITIES = {
     "kern": 0 << 3,
     "user": 1 << 3,
@@ -53,15 +64,29 @@ SYSLOG_FACILITIES = {
 
 logger = logging.getLogger(__name__)
 _integrity_lock = threading.Lock()
+_scan_metadata_cache: dict[
+    str,
+    tuple[tuple[int, int, int, int], str]
+] = {}
 
 
 class BaselineVerificationError(ValueError):
     pass
 
 
-def _get_baseline_hmac_key():
+def _config_value(name, fallback):
+    if has_app_context():
+        return current_app.config.get(name, fallback)
+    return fallback
 
-    key = os.getenv(BASELINE_HMAC_KEY_ENV)
+
+def _runtime_path(name, fallback):
+    return os.fspath(_config_value(name, fallback))
+
+
+def _get_baseline_hmac_key() -> bytes:
+
+    key = _config_value("BASELINE_HMAC_KEY", "")
 
     if not key:
 
@@ -80,9 +105,9 @@ def _get_baseline_hmac_key():
     return key.encode("utf-8")
 
 
-def _get_alert_cooldown_seconds():
+def _get_alert_cooldown_seconds() -> int:
 
-    value = os.getenv(ALERT_COOLDOWN_SECONDS_ENV, "3600")
+    value = _config_value("ALERT_COOLDOWN_SECONDS", 3600)
 
     try:
 
@@ -105,7 +130,7 @@ def _get_alert_cooldown_seconds():
 
 def _send_syslog_event(event):
 
-    host = os.getenv(SYSLOG_HOST_ENV)
+    host = _config_value("SYSLOG_HOST", "")
 
     if not host:
 
@@ -113,23 +138,23 @@ def _send_syslog_event(event):
 
     try:
 
-        port = int(os.getenv(SYSLOG_PORT_ENV, "514"))
+        port = int(_config_value("SYSLOG_PORT", 514))
 
     except ValueError as error:
 
-        raise ValueError(f"{SYSLOG_PORT_ENV} must be a port number.") from error
+        raise ValueError("SYSLOG_PORT must be a port number.") from error
 
     if not 1 <= port <= 65535:
 
-        raise ValueError(f"{SYSLOG_PORT_ENV} must be between 1 and 65535.")
+        raise ValueError("SYSLOG_PORT must be between 1 and 65535.")
 
-    facility_name = os.getenv(SYSLOG_FACILITY_ENV, "user").strip().lower()
+    facility_name = _config_value("SYSLOG_FACILITY", "user").strip().lower()
     facility = SYSLOG_FACILITIES.get(facility_name)
 
     if not isinstance(facility, int):
 
         raise ValueError(
-            f"{SYSLOG_FACILITY_ENV} must name a supported syslog facility."
+            "SYSLOG_FACILITY must name a supported syslog facility."
         )
 
     level = 6
@@ -180,7 +205,7 @@ def _baseline_signature(hashes, key):
 
 def _read_verified_baseline(key):
 
-    with open(BASELINE_FILE, "r", encoding="utf-8") as baseline:
+    with open(_runtime_path("BASELINE_FILE", BASELINE_FILE), "r", encoding="utf-8") as baseline:
 
         baseline_data = json.load(baseline)
 
@@ -240,7 +265,7 @@ def _read_previous_baseline_for_update(key):
 
         try:
 
-            with open(BASELINE_FILE, "r", encoding="utf-8") as baseline:
+            with open(_runtime_path("BASELINE_FILE", BASELINE_FILE), "r", encoding="utf-8") as baseline:
 
                 legacy_hashes = json.load(baseline)
 
@@ -300,17 +325,23 @@ def _is_ignored(relative_path, patterns):
 
 def _iter_watched_files():
 
-    if os.path.islink(WATCHED_FOLDER):
+    if has_app_context():
+        _, watched_folder = get_scan_settings()
+        watched_folder = os.fspath(watched_folder)
+    else:
+        watched_folder = WATCHED_FOLDER
+
+    if os.path.islink(watched_folder):
 
         raise OSError(
-            f"Watched directory must not be a symlink: {WATCHED_FOLDER}"
+            f"Watched directory must not be a symlink: {watched_folder}"
         )
 
-    if not os.path.isdir(WATCHED_FOLDER):
+    if not os.path.isdir(watched_folder):
 
         raise FileNotFoundError(
             f"Watched directory does not exist or is not accessible: "
-            f"{WATCHED_FOLDER}"
+            f"{watched_folder}"
         )
 
     def raise_walk_error(error):
@@ -319,7 +350,7 @@ def _iter_watched_files():
 
 
     for root, directories, filenames in os.walk(
-        WATCHED_FOLDER,
+        watched_folder,
         topdown=True,
         followlinks=False,
         onerror=raise_walk_error,
@@ -340,28 +371,40 @@ def _iter_watched_files():
 
             file_path = os.path.join(root, filename)
 
-            if os.path.islink(file_path):
+            file_stat = os.stat(file_path, follow_symlinks=False)
 
+            if stat.S_ISLNK(file_stat.st_mode):
                 logger.warning("Skipping symlinked file: %s", file_path)
                 continue
 
-            if not os.path.isfile(file_path):
+            if not stat.S_ISREG(file_stat.st_mode):
 
                 continue
 
             relative_path = os.path.relpath(
                 file_path,
-                WATCHED_FOLDER
+                watched_folder
             ).replace(os.sep, "/")
 
             yield relative_path, file_path
 
 
-def load_whitelist():
+def load_whitelist() -> list[str]:
 
-    with open(WHITELIST_FILE, "r", encoding="utf-8") as file:
+    whitelist_path = _runtime_path("WHITELIST_FILE", WHITELIST_FILE)
+    try:
+        file = open(whitelist_path, "r", encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    with file:
 
         data = json.load(file)
+
+    if not isinstance(data, dict) or "ignored_files" not in data:
+
+        raise ValueError(
+            "Whitelist configuration must contain an 'ignored_files' list."
+        )
 
     patterns = data["ignored_files"]
 
@@ -369,29 +412,120 @@ def load_whitelist():
         isinstance(pattern, str) for pattern in patterns
     ):
 
-        raise ValueError("'ignored_files' must be a list of path patterns.")
+        raise ValueError(
+            "Whitelist 'ignored_files' must be a list of path patterns."
+        )
 
     return patterns
 
 
+def validate_monitor_configuration() -> None:
+    """Validate required monitoring settings before the app starts."""
+
+    _get_baseline_hmac_key()
+    _get_alert_cooldown_seconds()
+    load_whitelist()
+
+
+def _metadata_cache_enabled() -> bool:
+
+    return bool(_config_value("SCAN_METADATA_CACHE", False))
+
+
+def _file_metadata(file_path: str) -> tuple[int, int, int, int]:
+
+    file_stat = os.stat(file_path, follow_symlinks=False)
+
+    return (
+        file_stat.st_dev,
+        file_stat.st_ino,
+        file_stat.st_size,
+        file_stat.st_mtime_ns
+    )
+
+
+def _hash_scanned_file(file_path: str | os.PathLike[str]) -> str:
+
+    if not _metadata_cache_enabled():
+
+        _scan_metadata_cache.clear()
+        return calculate_hash(file_path)
+
+    cache_key = os.path.abspath(os.fspath(file_path))
+    metadata = _file_metadata(cache_key)
+    cached = _scan_metadata_cache.get(cache_key)
+
+    if cached is not None and cached[0] == metadata:
+
+        return cached[1]
+
+    file_hash = calculate_hash(file_path)
+    metadata_after_hash = _file_metadata(cache_key)
+
+    if metadata == metadata_after_hash:
+
+        _scan_metadata_cache[cache_key] = (metadata, file_hash)
+
+    else:
+
+        _scan_metadata_cache.pop(cache_key, None)
+
+    return file_hash
+
+
+def _log_scan_progress(file_count: int, scan_name: str) -> None:
+
+    if file_count % SCAN_PROGRESS_INTERVAL == 0:
+
+        logger.info(
+            "Processed %d watched files during %s",
+            file_count,
+            scan_name
+        )
+
+
+def _append_rotating_log_file(log_path, message):
+
+    _append_log_line(log_path, message)
+
+
+def _escape_plaintext_log_field(value):
+
+    return "".join(
+        f"\\x{ord(character):02x}"
+        if ord(character) < 32 or ord(character) == 127
+        else f"\\u{ord(character):04x}"
+        if character in ("\u2028", "\u2029")
+        else character
+        for character in value
+    )
+
+
 def write_log(
-    event_type,
-    filename,
-    severity,
-    old_hash=None,
-    new_hash=None,
-    user=None,
-    actor=None,
-    details=None
-):
+    event_type: str,
+    filename: str,
+    severity: str,
+    old_hash: str | None = None,
+    new_hash: str | None = None,
+    user: str | None = None,
+    actor: str | None = None,
+    details: str | None = None,
+) -> None:
 
     timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
-    log_entry = f"{timestamp} | {severity} | {event_type} | {filename}\n"
+    log_entry = (
+        f"{timestamp} | {severity} | {event_type} | "
+        f"{_escape_plaintext_log_field(filename)}\n"
+    )
 
-    with open(LOG_FILE, "a", encoding="utf-8") as log:
-
-        log.write(log_entry)
+    logs_dir = _runtime_path("LOGS_DIR", os.path.dirname(LOG_FILE))
+    _append_rotating_log_file(
+        os.path.join(logs_dir, "security.log")
+        if has_app_context()
+        else LOG_FILE,
+        log_entry,
+    )
 
     structured_event = {
         "timestamp": timestamp,
@@ -404,9 +538,12 @@ def write_log(
         "user": user or "system"
     }
 
-    with open(JSON_LOG_FILE, "a", encoding="utf-8") as log:
-
-        log.write(json.dumps(structured_event, ensure_ascii=False) + "\n")
+    _append_rotating_log_file(
+        os.path.join(logs_dir, "security.jsonl")
+        if has_app_context()
+        else JSON_LOG_FILE,
+        json.dumps(structured_event, ensure_ascii=False) + "\n"
+    )
 
     try:
 
@@ -437,7 +574,7 @@ def write_log(
         )
 
 
-def create_baseline():
+def create_baseline() -> dict[str, list[str]]:
 
     key = _get_baseline_hmac_key()
     previous_hashes = _read_previous_baseline_for_update(key)
@@ -445,6 +582,8 @@ def create_baseline():
     hashes = {}
 
     ignored_patterns = load_whitelist()
+
+    file_count = 0
 
     for relative_path, file_path in _iter_watched_files():
 
@@ -455,6 +594,10 @@ def create_baseline():
         file_hash = calculate_hash(file_path)
 
         hashes[relative_path] = file_hash
+        file_count += 1
+        _log_scan_progress(file_count, "baseline creation")
+
+    logger.info("Baseline scan completed; processed %d watched files", file_count)
 
     signature = _baseline_signature(hashes, key)
     baseline_data = {
@@ -462,7 +605,7 @@ def create_baseline():
         "signature": signature
     }
 
-    baseline_path = os.fspath(BASELINE_FILE)
+    baseline_path = _runtime_path("BASELINE_FILE", BASELINE_FILE)
     baseline_directory = os.path.dirname(os.path.abspath(baseline_path))
     os.makedirs(baseline_directory, exist_ok=True)
     temporary_path = None
@@ -485,6 +628,7 @@ def create_baseline():
 
         os.replace(temporary_path, baseline_path)
         temporary_path = None
+        _scan_metadata_cache.clear()
 
     finally:
 
@@ -505,7 +649,7 @@ def create_baseline():
                     temporary_path,
                 )
 
-    print("Baseline created successfully.")
+    logger.info("Baseline created successfully at %s", baseline_path)
 
     previous_filenames = set(previous_hashes)
     current_filenames = set(hashes)
@@ -522,7 +666,7 @@ def create_baseline():
     }
 
 
-def check_integrity():
+def check_integrity() -> list[str]:
 
     with _integrity_lock:
 
@@ -538,6 +682,12 @@ def _check_integrity():
 
         stored_hashes = _read_verified_baseline(key)
 
+    except FileNotFoundError:
+        logger.warning(
+            "No integrity baseline exists yet; an authenticated user must approve one."
+        )
+        return ["[SETUP] Baseline approval required"]
+
     except (
         OSError,
         UnicodeDecodeError,
@@ -548,7 +698,7 @@ def _check_integrity():
 
         alert = "[CRITICAL] BASELINE TAMPERED: hashes.json"
         event_type = "BASELINE TAMPERED"
-        filename = BASELINE_FILE
+        filename = _runtime_path("BASELINE_FILE", BASELINE_FILE)
         active_events = {(event_type, filename)}
 
         if should_record_alert(
@@ -572,6 +722,8 @@ def _check_integrity():
 
     ignored_patterns = load_whitelist()
     current_hashes = {}
+    scanned_paths = set()
+    file_count = 0
 
     alerts = []
     active_events = []
@@ -582,7 +734,15 @@ def _check_integrity():
 
             continue
 
-        current_hashes[relative_path] = calculate_hash(file_path)
+        current_hashes[relative_path] = _hash_scanned_file(file_path)
+        scanned_paths.add(os.path.abspath(os.fspath(file_path)))
+        file_count += 1
+        _log_scan_progress(file_count, "integrity scan")
+
+    logger.info("Integrity scan completed; processed %d watched files", file_count)
+    for cached_path in tuple(_scan_metadata_cache):
+        if cached_path not in scanned_paths:
+            _scan_metadata_cache.pop(cached_path, None)
 
 
     # Check modified files

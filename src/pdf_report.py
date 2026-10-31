@@ -1,4 +1,9 @@
+"""PDF report generation for HashGuard security events."""
+
 import os
+from collections.abc import Iterable
+from os import PathLike
+
 from datetime import datetime, timezone
 from xml.sax.saxutils import escape
 
@@ -14,6 +19,8 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+
+from src.event_status import EventStatus
 
 
 NAVY = colors.HexColor("#101a28")
@@ -195,7 +202,9 @@ def _make_styles():
 def _summary_cards(events, stats, top_file, styles):
 
     total_events = len(events)
-    open_events = sum(1 for event in events if event[4] == "open")
+    open_events = sum(
+        1 for event in events if event[4] == EventStatus.OPEN.value
+    )
     critical_events = sum(
         1 for event in events if str(event[1]).upper() == "CRITICAL"
     )
@@ -330,11 +339,11 @@ def _event_table(events, styles):
 
 
 def generate_pdf_report(
-    filename,
-    stats,
-    top_file,
-    events=(),
-):
+    filename: str | PathLike[str],
+    stats: Iterable[tuple[str, int]],
+    top_file: tuple[str, int] | None,
+    events: Iterable[tuple[object, ...]] = (),
+) -> None:
 
     events = list(events)
     styles = _make_styles()

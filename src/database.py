@@ -1,15 +1,50 @@
+"""SQLite persistence helpers for HashGuard users, settings, and events."""
+
 import sqlite3
 import os
 import time
 import logging
+from collections.abc import Iterable, Mapping
+from typing import TypeAlias
 
+from flask import current_app
 from werkzeug.security import (
     generate_password_hash,
     check_password_hash
 )
+from src.config import DEFAULT_DATABASE_PATH, PROJECT_ROOT
+from src.event_status import EVENT_STATUSES, EventStatus
 
-DB_PATH = "database/security.db"
+DB_PATH = os.fspath(PROJECT_ROOT / DEFAULT_DATABASE_PATH)
 logger = logging.getLogger(__name__)
+
+EventRecord: TypeAlias = tuple[
+    str | None,
+    str | None,
+    str | None,
+    str | None,
+    str,
+    str | None,
+    str | None,
+    int,
+    str | None,
+    str | None,
+]
+EventSeverityCount: TypeAlias = tuple[str | None, int]
+TargetedFileCount: TypeAlias = tuple[str | None, int]
+
+
+def _database_path(path: str | os.PathLike[str] | None = None) -> str:
+    if path is not None:
+        return os.fspath(path)
+    try:
+        return os.fspath(current_app.config["DATABASE"])
+    except RuntimeError:
+        return DB_PATH
+
+
+def _connect() -> sqlite3.Connection:
+    return sqlite3.connect(_database_path())
 
 
 def _get_security_event_columns(cursor):
@@ -22,15 +57,19 @@ def _get_security_event_columns(cursor):
     }
 
 
-def initialize_database():
+def initialize_database(path: str | os.PathLike[str] | None = None) -> None:
 
-    os.makedirs("database", exist_ok=True)
+    database_path = _database_path(path)
+    database_directory = os.path.dirname(os.path.abspath(database_path))
+    os.makedirs(database_directory, exist_ok=True)
 
-    connection = sqlite3.connect(DB_PATH)
+    connection = sqlite3.connect(database_path)
 
     cursor = connection.cursor()
 
-    cursor.execute("""
+    status_values = ", ".join(repr(status) for status in EVENT_STATUSES)
+
+    cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS security_events (
 
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,12 +77,9 @@ def initialize_database():
             severity TEXT,
             event_type TEXT,
             filename TEXT,
-            status TEXT NOT NULL DEFAULT 'open'
+            status TEXT NOT NULL DEFAULT '{EventStatus.OPEN.value}'
                 CHECK (status IN (
-                    'open',
-                    'acknowledged',
-                    'resolved',
-                    'false_positive'
+                    {status_values}
                 )),
             status_changed_by TEXT,
             status_changed_at TEXT,
@@ -55,14 +91,11 @@ def initialize_database():
 
     if "status" not in _get_security_event_columns(cursor):
 
-        cursor.execute("""
+        cursor.execute(f"""
             ALTER TABLE security_events
-            ADD COLUMN status TEXT NOT NULL DEFAULT 'open'
+            ADD COLUMN status TEXT NOT NULL DEFAULT '{EventStatus.OPEN.value}'
                 CHECK (status IN (
-                    'open',
-                    'acknowledged',
-                    'resolved',
-                    'false_positive'
+                    {status_values}
                 ))
         """)
 
@@ -142,15 +175,15 @@ def initialize_database():
 
 
 def save_event(
-    timestamp,
-    severity,
-    event_type,
-    filename,
-    actor=None,
-    details=None
-):
+    timestamp: str,
+    severity: str,
+    event_type: str,
+    filename: str,
+    actor: str | None = None,
+    details: str | None = None,
+) -> None:
 
-    connection = sqlite3.connect(DB_PATH)
+    connection = _connect()
 
     cursor = connection.cursor()
 
@@ -165,20 +198,18 @@ def save_event(
     connection.close()
 
 
-def update_event_status(event_id, status, changed_by, changed_at):
+def update_event_status(
+    event_id: int,
+    status: str,
+    changed_by: str,
+    changed_at: str,
+) -> bool:
 
-    allowed_statuses = {
-        "open",
-        "acknowledged",
-        "resolved",
-        "false_positive"
-    }
-
-    if status not in allowed_statuses:
+    if status not in EVENT_STATUSES:
 
         return False
 
-    connection = sqlite3.connect(DB_PATH)
+    connection = _connect()
 
     cursor = connection.cursor()
 
@@ -199,15 +230,15 @@ def update_event_status(event_id, status, changed_by, changed_at):
 
 
 def should_record_alert(
-    event_type,
-    filename,
-    state_fingerprint,
-    cooldown_seconds,
-    now=None
-):
+    event_type: str,
+    filename: str,
+    state_fingerprint: str,
+    cooldown_seconds: int,
+    now: float | None = None,
+) -> bool:
 
     current_time = time.time() if now is None else now
-    connection = sqlite3.connect(DB_PATH)
+    connection = _connect()
     cursor = connection.cursor()
 
     cursor.execute("""
@@ -247,9 +278,11 @@ def should_record_alert(
     return should_record
 
 
-def resolve_alert_states(active_alerts):
+def resolve_alert_states(
+    active_alerts: Iterable[tuple[str, str]],
+) -> None:
 
-    connection = sqlite3.connect(DB_PATH)
+    connection = _connect()
 
     cursor = connection.cursor()
 
@@ -267,9 +300,9 @@ def resolve_alert_states(active_alerts):
     connection.close()
 
 
-def get_all_events():
+def get_all_events() -> list[EventRecord]:
 
-    connection = sqlite3.connect(DB_PATH)
+    connection = _connect()
 
     cursor = connection.cursor()
 
@@ -295,9 +328,9 @@ def get_all_events():
     return rows
 
 
-def get_event_statistics():
+def get_event_statistics() -> list[EventSeverityCount]:
 
-    connection = sqlite3.connect(DB_PATH)
+    connection = _connect()
 
     cursor = connection.cursor()
 
@@ -315,9 +348,9 @@ def get_event_statistics():
     return stats
 
 
-def get_event_summary():
+def get_event_summary() -> dict[str, int]:
 
-    connection = sqlite3.connect(DB_PATH)
+    connection = _connect()
     cursor = connection.cursor()
 
     cursor.execute("""
@@ -325,7 +358,7 @@ def get_event_summary():
                COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0),
                COALESCE(SUM(CASE WHEN severity = ? THEN 1 ELSE 0 END), 0)
         FROM security_events
-    """, ("open", "CRITICAL"))
+    """, (EventStatus.OPEN.value, "CRITICAL"))
 
     total_events, open_events, critical_events = cursor.fetchone()
     connection.close()
@@ -337,9 +370,9 @@ def get_event_summary():
     }
 
 
-def count_users():
+def count_users() -> int:
 
-    connection = sqlite3.connect(DB_PATH)
+    connection = _connect()
 
     try:
 
@@ -364,9 +397,12 @@ def count_users():
         connection.close()
 
 
-def get_app_setting(setting_key, default=None):
+def get_app_setting(
+    setting_key: str,
+    default: str | None = None,
+) -> str | None:
 
-    connection = sqlite3.connect(DB_PATH)
+    connection = _connect()
     cursor = connection.cursor()
     cursor.execute(
         "SELECT setting_value FROM app_settings WHERE setting_key = ?",
@@ -378,9 +414,9 @@ def get_app_setting(setting_key, default=None):
     return result[0] if result else default
 
 
-def set_app_setting(setting_key, setting_value):
+def set_app_setting(setting_key: str, setting_value: str) -> None:
 
-    connection = sqlite3.connect(DB_PATH)
+    connection = _connect()
     cursor = connection.cursor()
     cursor.execute("""
         INSERT INTO app_settings (setting_key, setting_value)
@@ -392,9 +428,26 @@ def set_app_setting(setting_key, setting_value):
     connection.close()
 
 
-def clear_app_setting(setting_key):
+def set_app_settings(settings: Mapping[str, str]) -> None:
+    connection = _connect()
+    try:
+        with connection:
+            connection.executemany(
+                """
+                INSERT INTO app_settings (setting_key, setting_value)
+                VALUES (?, ?)
+                ON CONFLICT(setting_key) DO UPDATE SET
+                    setting_value = excluded.setting_value
+                """,
+                settings.items(),
+            )
+    finally:
+        connection.close()
 
-    connection = sqlite3.connect(DB_PATH)
+
+def clear_app_setting(setting_key: str) -> None:
+
+    connection = _connect()
     cursor = connection.cursor()
     cursor.execute(
         "DELETE FROM app_settings WHERE setting_key = ?",
@@ -404,9 +457,9 @@ def clear_app_setting(setting_key):
     connection.close()
 
 
-def get_most_targeted_file():
+def get_most_targeted_file() -> TargetedFileCount | None:
 
-    connection = sqlite3.connect(DB_PATH)
+    connection = _connect()
 
     cursor = connection.cursor()
 
@@ -427,9 +480,13 @@ def get_most_targeted_file():
     return result
 
 
-def search_events(filename, status=None, severity=None):
+def search_events(
+    filename: str,
+    status: str | None = None,
+    severity: str | None = None,
+) -> list[EventRecord]:
 
-    connection = sqlite3.connect(DB_PATH)
+    connection = _connect()
 
     cursor = connection.cursor()
 
@@ -470,9 +527,9 @@ def search_events(filename, status=None, severity=None):
     return rows
 
 
-def filter_by_severity(severity):
+def filter_by_severity(severity: str) -> list[EventRecord]:
 
-    connection = sqlite3.connect(DB_PATH)
+    connection = _connect()
 
     cursor = connection.cursor()
 
@@ -499,7 +556,11 @@ def filter_by_severity(severity):
     return rows
 
 
-def filter_events(severity=None, status=None, filename=None):
+def filter_events(
+    severity: str | None = None,
+    status: str | None = None,
+    filename: str | None = None,
+) -> list[EventRecord]:
 
     conditions = []
     parameters = []
@@ -539,7 +600,7 @@ def filter_events(severity=None, status=None, filename=None):
 
     query += " ORDER BY id DESC"
 
-    connection = sqlite3.connect(DB_PATH)
+    connection = _connect()
 
     cursor = connection.cursor()
 
@@ -552,24 +613,36 @@ def filter_events(severity=None, status=None, filename=None):
     return rows
 
 
-def register_user(username, password):
+def _register_user(username, password, only_if_first_user):
 
     connection = None
 
     try:
 
-        connection = sqlite3.connect(DB_PATH)
+        connection = _connect()
         cursor = connection.cursor()
         password_hash = generate_password_hash(password)
 
-        cursor.execute("""
-            INSERT INTO users
-            (username, password)
+        if only_if_first_user:
 
-            VALUES (?, ?)
-        """, (username, password_hash))
+            cursor.execute("""
+                INSERT INTO users (username, password)
+                SELECT ?, ?
+                WHERE NOT EXISTS (SELECT 1 FROM users)
+            """, (username, password_hash))
+
+        else:
+
+            cursor.execute("""
+                INSERT INTO users
+                (username, password)
+
+                VALUES (?, ?)
+            """, (username, password_hash))
 
         connection.commit()
+
+        return cursor.rowcount == 1
 
     except sqlite3.IntegrityError as error:
 
@@ -591,12 +664,20 @@ def register_user(username, password):
 
             connection.close()
 
-    return True
+
+def register_user(username: str, password: str) -> bool:
+
+    return _register_user(username, password, only_if_first_user=False)
 
 
-def verify_user(username, password):
+def register_first_user(username: str, password: str) -> bool:
 
-    connection = sqlite3.connect(DB_PATH)
+    return _register_user(username, password, only_if_first_user=True)
+
+
+def verify_user(username: str, password: str) -> bool:
+
+    connection = _connect()
 
     cursor = connection.cursor()
 
