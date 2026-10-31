@@ -111,6 +111,27 @@ def test_mapping_paths_resolve_relative_to_hashguard_root(tmp_path):
     assert config.baseline_file == tmp_path / "baseline" / "hashes.json"
 
 
+def test_default_whitelist_is_loaded_from_config_directory(tmp_path):
+    from src.config import AppConfig
+
+    watched = tmp_path / "watched"
+    watched.mkdir()
+    whitelist = tmp_path / "config" / "whitelist.json"
+    whitelist.parent.mkdir()
+    whitelist.write_text('{"ignored_files": []}', encoding="utf-8")
+
+    config = AppConfig.from_env(
+        {
+            "SECRET_KEY": "config-test-secret",
+            "BASELINE_HMAC_KEY": "config-test-baseline-key",
+            "HASHGUARD_ROOT": str(tmp_path),
+            "SCAN_ROOT": "watched",
+        }
+    )
+
+    assert config.whitelist_file == whitelist
+
+
 def test_register_first_user_blocks_second_then_login_and_logout(app):
     app.config["WTF_CSRF_ENABLED"] = False
 

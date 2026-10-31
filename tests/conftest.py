@@ -7,6 +7,17 @@ from src import database
 
 
 @pytest.fixture
+def capture_project_logs(caplog):
+    from src.monitor import logger
+
+    logger.addHandler(caplog.handler)
+    try:
+        yield caplog
+    finally:
+        logger.removeHandler(caplog.handler)
+
+
+@pytest.fixture
 def app(tmp_path, monkeypatch):
     root = tmp_path / "scan-root"
     root.mkdir()
@@ -39,4 +50,3 @@ def app(tmp_path, monkeypatch):
         }
     )
     yield instance
-

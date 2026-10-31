@@ -499,7 +499,7 @@ def test_baseline_refresh_normalizes_signed_windows_path_separators(
     assert changes == {"added": [], "modified": [], "removed": []}
 
 
-def test_symlinks_are_skipped_and_warned(monitoring_paths, caplog):
+def test_symlinks_are_skipped_and_warned(monitoring_paths, capture_project_logs):
     watched, baseline_file, _ = monitoring_paths
     target = watched / "target.txt"
     target.write_text("target", encoding="utf-8")
@@ -513,7 +513,7 @@ def test_symlinks_are_skipped_and_warned(monitoring_paths, caplog):
 
         pytest.skip(f"Symlink creation unavailable: {error}")
 
-    with caplog.at_level("WARNING", logger=monitor.logger.name):
+    with capture_project_logs.at_level("WARNING", logger=monitor.logger.name):
 
         monitor.create_baseline()
 
@@ -522,7 +522,32 @@ def test_symlinks_are_skipped_and_warned(monitoring_paths, caplog):
     )["hashes"]
     assert "target.txt" in hashes
     assert "link.txt" not in hashes
-    assert "Skipping symlinked file" in caplog.text
+    assert "Skipping symlinked file" in capture_project_logs.text
+
+
+def test_symlinked_directories_are_skipped_and_warned(
+    monitoring_paths,
+    capture_project_logs,
+):
+    watched, baseline_file, _ = monitoring_paths
+    target_directory = watched.parent / "target-directory"
+    target_directory.mkdir()
+    (target_directory / "target.txt").write_text("target", encoding="utf-8")
+    link_directory = watched / "linked-directory"
+
+    try:
+        os.symlink(target_directory, link_directory, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"Symlink creation unavailable: {error}")
+
+    with capture_project_logs.at_level("WARNING", logger=monitor.logger.name):
+        monitor.create_baseline()
+
+    hashes = json.loads(
+        baseline_file.read_text(encoding="utf-8"),
+    )["hashes"]
+    assert hashes == {}
+    assert "Skipping symlinked directory" in capture_project_logs.text
 
 
 def test_detects_modified_file_as_high(monitoring_paths):

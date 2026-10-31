@@ -19,7 +19,7 @@ DEFAULT_REPORTS_DIR = "reports"
 DEFAULT_SCAN_ROOT = "watched"
 DEFAULT_WATCHED_FOLDER = "."
 DEFAULT_BASELINE_FILE = "baseline/hashes.json"
-DEFAULT_WHITELIST_FILE = "whitelist.json"
+DEFAULT_WHITELIST_FILE = "config/whitelist.json"
 
 
 def load_config(

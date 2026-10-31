@@ -110,10 +110,11 @@ HashGuard/
 ├── wsgi.py                    # WSGI factory entrypoint
 ├── cli.py                     # One-shot CLI scanner
 ├── scheduler_main.py          # Locked standalone scheduler
+├── config/
+│   └── whitelist.json         # Files explicitly ignored during monitoring
 ├── .github/
 │   └── workflows/
 │       └── ci.yml              # GitHub Actions lint and test workflow
-├── whitelist.json             # Files explicitly ignored during monitoring
 ├── requirements.txt           # Pinned Python dependencies
 ├── requirements-dev.txt       # Test and lint dependencies
 ├── pyproject.toml             # Ruff configuration
@@ -259,7 +260,7 @@ REPORTS_DIR=reports
 SCAN_ROOT=watched
 WATCHED_FOLDER=.
 BASELINE_FILE=baseline/hashes.json
-WHITELIST_FILE=whitelist.json
+WHITELIST_FILE=config/whitelist.json
 SCAN_INTERVAL_SECONDS=300
 RATELIMIT_STORAGE_URI=memory://
 ```
@@ -431,7 +432,7 @@ Set `BASELINE_HMAC_KEY` in `.env` to a long, random secret before starting the a
 The file:
 
 ```text
-whitelist.json
+config/whitelist.json
 ```
 
 contains ignored path patterns that should not be monitored. Paths use `/` separators. A plain name such as `temp.txt` matches only that file at the root of `watched/`, not `sub/temp.txt`. Patterns match path segments; `**` matches zero or more directories:
