@@ -3,19 +3,19 @@ import hmac
 import json
 import os
 import threading
-import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
+from flask import current_app
 
 from src import database, monitor
+from app import create_app
 from src.hasher import calculate_hash
 
 
 @pytest.fixture
 def monitoring_paths(tmp_path, monkeypatch):
-    monkeypatch.setenv("BASELINE_HMAC_KEY", "test-baseline-hmac-key")
-
     watched = tmp_path / "watched"
     baseline_dir = tmp_path / "baseline"
     logs_dir = tmp_path / "logs"
@@ -36,10 +36,28 @@ def monitoring_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(monitor, "JSON_LOG_FILE", str(logs_dir / "security.jsonl"))
     monkeypatch.setattr(monitor, "WHITELIST_FILE", str(whitelist_file))
     monkeypatch.setattr(monitor, "send_email_alert", lambda *args: None)
-    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "security.db"))
-    database.initialize_database()
-
-    return watched, baseline_file, whitelist_file
+    database_path = tmp_path / "security.db"
+    monkeypatch.setattr(database, "DB_PATH", str(database_path))
+    app = create_app(
+        {
+            "SECRET_KEY": "test-secret-key",
+            "BASELINE_HMAC_KEY": "test-baseline-hmac-key",
+            "DATABASE": str(database_path),
+            "LOGS_DIR": str(logs_dir),
+            "REPORTS_DIR": str(tmp_path / "reports"),
+            "SCAN_ROOT": str(watched),
+            "WATCHED_FOLDER": str(watched),
+            "BASELINE_FILE": str(baseline_file),
+            "WHITELIST_FILE": str(whitelist_file),
+            "SESSION_COOKIE_SECURE": False,
+        }
+    )
+    context = app.app_context()
+    context.push()
+    try:
+        yield watched, baseline_file, whitelist_file
+    finally:
+        context.pop()
 
 
 def test_write_log_writes_structured_jsonl_event(monitoring_paths):
@@ -77,6 +95,47 @@ def test_write_log_writes_structured_jsonl_event(monitoring_paths):
     assert event["user"] == "analyst"
 
 
+def test_write_log_creates_missing_log_directory(tmp_path, monkeypatch):
+    logs_dir = tmp_path / "not-created-yet"
+    monkeypatch.setattr(monitor, "LOG_FILE", str(logs_dir / "security.log"))
+    monkeypatch.setattr(
+        monitor,
+        "JSON_LOG_FILE",
+        str(logs_dir / "security.jsonl"),
+    )
+    monkeypatch.setattr(monitor, "save_event", lambda *args, **kwargs: None)
+
+    monitor.write_log("MODIFIED", "config.txt", "HIGH")
+
+    assert logs_dir.is_dir()
+    text_log = logs_dir / "security.log"
+    assert text_log.is_file()
+    assert "HIGH | MODIFIED | config.txt" in text_log.read_text(encoding="utf-8")
+    assert (logs_dir / "security.jsonl").is_file()
+
+
+def test_write_log_rotates_text_and_jsonl_files(monitoring_paths, monkeypatch):
+    logs_dir = Path(monitor.LOG_FILE).parent
+    import logging
+
+    for logger_name in ("hashguard.events", "hashguard.json"):
+        for handler in logging.getLogger(logger_name).handlers:
+            monkeypatch.setattr(handler, "maxBytes", 1)
+
+    monitor.write_log("FIRST", "first.txt", "LOW")
+    monitor.write_log("SECOND", "second.txt", "LOW")
+
+    text_backup = logs_dir / "security.log.1"
+    json_backup = logs_dir / "security.jsonl.1"
+    assert text_backup.is_file()
+    assert json_backup.is_file()
+    assert "FIRST | first.txt" in text_backup.read_text(encoding="utf-8")
+    assert "first.txt" in json_backup.read_text(encoding="utf-8")
+    assert "SECOND | second.txt" in Path(monitor.LOG_FILE).read_text(
+        encoding="utf-8"
+    )
+
+
 def test_write_log_uses_utf8_for_unicode_filenames(monitoring_paths):
     monitor.write_log("NEW FILE", "résumé-🔐.txt", "MEDIUM")
 
@@ -88,7 +147,25 @@ def test_write_log_uses_utf8_for_unicode_filenames(monitoring_paths):
     assert "résumé-🔐.txt" in structured_log
 
 
+def test_write_log_escapes_control_characters_in_plaintext_filename(
+    monitoring_paths,
+):
+    filename = "normal.txt\n2020 | CRITICAL | DELETED | victim.txt"
+
+    monitor.write_log("NEW FILE", filename, "MEDIUM")
+
+    with open(monitor.LOG_FILE, encoding="utf-8") as text_log_file:
+        text_log = text_log_file.read()
+    with open(monitor.JSON_LOG_FILE, encoding="utf-8") as structured_log_file:
+        structured_event = json.loads(structured_log_file.readline())
+
+    assert len(text_log.splitlines()) == 1
+    assert "\\x0a2020 | CRITICAL | DELETED | victim.txt" in text_log
+    assert structured_event["filename"] == filename
+
+
 def test_optional_syslog_forwarding_uses_environment_configuration(
+    monitoring_paths,
     monkeypatch,
 ):
     sent = []
@@ -103,9 +180,11 @@ def test_optional_syslog_forwarding_uses_environment_configuration(
         def sendto(self, message, address):
             sent.append((message, address))
 
-    monkeypatch.setenv("SYSLOG_HOST", "syslog.example.test")
-    monkeypatch.setenv("SYSLOG_PORT", "1514")
-    monkeypatch.setenv("SYSLOG_FACILITY", "local0")
+    current_app.config.update(
+        SYSLOG_HOST="syslog.example.test",
+        SYSLOG_PORT=1514,
+        SYSLOG_FACILITY="local0",
+    )
     monkeypatch.setattr(
         monitor.socket,
         "getaddrinfo",
@@ -135,22 +214,25 @@ def test_optional_syslog_forwarding_uses_environment_configuration(
 def test_syslog_configuration_error_does_not_skip_database_event(
     monitoring_paths,
     monkeypatch,
-    caplog,
 ):
     _, baseline_file, _ = monitoring_paths
     write_baseline(baseline_file, {"file.txt": "previous-hash"})
-    monkeypatch.setenv("SYSLOG_HOST", "syslog.example.test")
-    monkeypatch.setenv("SYSLOG_PORT", "invalid")
+    current_app.config.update(
+        SYSLOG_HOST="syslog.example.test",
+        SYSLOG_PORT="invalid",
+    )
     emails = []
     monkeypatch.setattr(monitor, "send_email_alert", emails.append)
 
-    with caplog.at_level("ERROR", logger=monitor.logger.name):
-        alerts = monitor.check_integrity()
+    alerts = monitor.check_integrity()
 
     assert alerts == ["[CRITICAL] DELETED: file.txt"]
     assert len(database.get_all_events()) == 1
     assert emails == ["[CRITICAL] DELETED: file.txt"]
-    assert "Optional syslog forwarding failed." in caplog.text
+    log_text = (
+        Path(current_app.config["LOGS_DIR"]) / "security.log"
+    ).read_text(encoding="utf-8")
+    assert "Optional syslog forwarding failed." in log_text
 
 
 def write_baseline(path, hashes):
@@ -254,6 +336,10 @@ def test_concurrent_integrity_checks_record_and_email_new_event_once(
     active_checks = 0
     max_active_checks = 0
     active_checks_lock = threading.Lock()
+    first_check_entered = threading.Event()
+    second_check_started = threading.Event()
+    release_first_check = threading.Event()
+    test_app = current_app._get_current_object()
 
     def tracked_should_record_alert(*args, **kwargs):
         nonlocal active_checks, max_active_checks
@@ -262,7 +348,8 @@ def test_concurrent_integrity_checks_record_and_email_new_event_once(
             active_checks += 1
             max_active_checks = max(max_active_checks, active_checks)
 
-        time.sleep(0.05)
+        first_check_entered.set()
+        assert release_first_check.wait(timeout=5)
 
         try:
             return original_should_record_alert(*args, **kwargs)
@@ -273,13 +360,22 @@ def test_concurrent_integrity_checks_record_and_email_new_event_once(
     monkeypatch.setattr(monitor, "should_record_alert", tracked_should_record_alert)
     start_checks = threading.Event()
 
-    def run_check():
+    def run_check(index):
         start_checks.wait()
-        return monitor.check_integrity()
+        if index == 1:
+            second_check_started.set()
+        with test_app.app_context():
+            return monitor.check_integrity()
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        checks = [executor.submit(run_check) for _ in range(2)]
+        checks = [
+            executor.submit(run_check, index)
+            for index in range(2)
+        ]
         start_checks.set()
+        assert first_check_entered.wait(timeout=5)
+        assert second_check_started.wait(timeout=5)
+        release_first_check.set()
         results = [check.result() for check in checks]
 
     assert results == [
@@ -451,8 +547,8 @@ def test_missing_watched_directory_fails_without_reporting_deletions(
 ):
     _, baseline_file, _ = monitoring_paths
     write_baseline(baseline_file, {"important.txt": "previous-hash"})
-    missing_folder = baseline_file.parent.parent / "missing-watched"
-    monkeypatch.setattr(monitor, "WATCHED_FOLDER", str(missing_folder))
+    missing_folder = Path(current_app.config["SCAN_ROOT"]) / "missing-watched"
+    current_app.config["WATCHED_FOLDER"] = str(missing_folder)
 
     with pytest.raises(FileNotFoundError, match="Watched directory"):
         monitor.check_integrity()
@@ -482,12 +578,67 @@ def test_watched_directory_walk_error_fails_scan(
     assert database.get_all_events() == []
 
 
+def test_file_disappearing_during_scan_aborts_without_reporting_deletion(
+    monitoring_paths,
+    monkeypatch,
+):
+    watched, baseline_file, _ = monitoring_paths
+    target = watched / "raced.txt"
+    target.write_text("present when scan starts", encoding="utf-8")
+    write_baseline(baseline_file, {"raced.txt": calculate_hash(target)})
+
+    def walk_then_remove(_folder, **_kwargs):
+        target.unlink()
+        yield str(watched), [], ["raced.txt"]
+
+    monkeypatch.setattr(monitor.os, "walk", walk_then_remove)
+
+    with pytest.raises(FileNotFoundError):
+        monitor.check_integrity()
+
+    assert database.get_all_events() == []
+
+
 def test_detects_new_file_as_medium(monitoring_paths):
     watched, baseline_file, _ = monitoring_paths
     (watched / "new.txt").write_text("new file", encoding="utf-8")
     write_baseline(baseline_file, {})
 
     assert monitor.check_integrity() == ["[MEDIUM] NEW FILE: new.txt"]
+
+
+def test_renamed_file_is_detected_as_deleted_and_new(monitoring_paths):
+    watched, baseline_file, _ = monitoring_paths
+    (watched / "renamed.txt").write_text("same contents", encoding="utf-8")
+    write_baseline(
+        baseline_file,
+        {"original.txt": calculate_hash(watched / "renamed.txt")},
+    )
+
+    assert monitor.check_integrity() == [
+        "[CRITICAL] DELETED: original.txt",
+        "[MEDIUM] NEW FILE: renamed.txt",
+    ]
+
+
+def test_permission_error_during_hashing_fails_scan_without_events(
+    monitoring_paths,
+    monkeypatch,
+):
+    watched, baseline_file, _ = monitoring_paths
+    target = watched / "restricted.txt"
+    target.write_text("protected", encoding="utf-8")
+    write_baseline(baseline_file, {"restricted.txt": "previous-hash"})
+
+    def denied(_path):
+        raise PermissionError("access denied")
+
+    monkeypatch.setattr(monitor, "calculate_hash", denied)
+
+    with pytest.raises(PermissionError, match="access denied"):
+        monitor.check_integrity()
+
+    assert database.get_all_events() == []
 
 
 def test_check_integrity_ignores_whitelisted_files(monitoring_paths):
@@ -520,6 +671,107 @@ def test_check_integrity_accepts_valid_signature(monitoring_paths):
     monitor.create_baseline()
 
     assert monitor.check_integrity() == []
+
+
+def test_metadata_cache_is_opt_in_and_reuses_unchanged_hash(
+    monitoring_paths,
+    monkeypatch,
+):
+    watched, baseline_file, _ = monitoring_paths
+    target = watched / "cached.txt"
+    target.write_text("unchanged", encoding="utf-8")
+    file_hash = calculate_hash(target)
+    write_baseline(baseline_file, {"cached.txt": file_hash})
+
+    calls = []
+
+    def track_hash(path):
+        calls.append(path)
+        return file_hash
+
+    monkeypatch.setattr(monitor, "calculate_hash", track_hash)
+    current_app.config["SCAN_METADATA_CACHE"] = True
+    monitor._scan_metadata_cache.clear()
+
+    assert monitor.check_integrity() == []
+    assert monitor.check_integrity() == []
+    assert len(calls) == 1
+
+
+def test_full_hash_verification_detects_change_with_preserved_metadata(
+    monitoring_paths,
+    monkeypatch,
+):
+    watched, baseline_file, _ = monitoring_paths
+    target = watched / "tampered.txt"
+    target.write_text("original", encoding="utf-8")
+    file_hash = calculate_hash(target)
+    original_stat = target.stat()
+    write_baseline(baseline_file, {"tampered.txt": file_hash})
+    current_app.config["SCAN_METADATA_CACHE"] = True
+    monitor._scan_metadata_cache.clear()
+
+    assert monitor.check_integrity() == []
+
+    target.write_text("tampered", encoding="utf-8")
+    os.utime(
+        target,
+        ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+    )
+    current_app.config["SCAN_METADATA_CACHE"] = False
+
+    assert monitor.check_integrity() == ["[HIGH] MODIFIED: tampered.txt"]
+
+
+def test_full_hashing_remains_default(
+    monitoring_paths,
+    monkeypatch,
+):
+    watched, baseline_file, _ = monitoring_paths
+    target = watched / "verified.txt"
+    target.write_text("unchanged", encoding="utf-8")
+    file_hash = calculate_hash(target)
+    write_baseline(baseline_file, {"verified.txt": file_hash})
+
+    calls = []
+
+    def track_hash(path):
+        calls.append(path)
+        return file_hash
+
+    monkeypatch.setattr(monitor, "calculate_hash", track_hash)
+    current_app.config["SCAN_METADATA_CACHE"] = False
+    monitor._scan_metadata_cache.clear()
+
+    assert monitor.check_integrity() == []
+    assert monitor.check_integrity() == []
+    assert len(calls) == 2
+
+
+def test_integrity_scan_logs_progress_for_large_scans(
+    monitoring_paths,
+    monkeypatch,
+):
+    _, baseline_file, _ = monitoring_paths
+    write_baseline(baseline_file, {})
+    monkeypatch.setattr(
+        monitor,
+        "_iter_watched_files",
+        lambda: (
+            (f"file-{index}.txt", f"file-{index}.txt")
+            for index in range(100)
+        ),
+    )
+    monkeypatch.setattr(monitor, "calculate_hash", lambda _path: "file-hash")
+    monkeypatch.setattr(monitor, "write_log", lambda *args, **kwargs: None)
+    current_app.config["SCAN_METADATA_CACHE"] = False
+
+    monitor.check_integrity()
+
+    log_text = (
+        Path(current_app.config["LOGS_DIR"]) / "security.log"
+    ).read_text(encoding="utf-8")
+    assert "Processed 100 watched files" in log_text
 
 
 def test_tampered_baseline_is_logged_alerted_and_not_compared(
@@ -570,7 +822,7 @@ def test_missing_signature_is_reported_and_not_compared(
 
 
 def test_missing_hmac_key_raises_clear_error(monitoring_paths, monkeypatch):
-    monkeypatch.delenv("BASELINE_HMAC_KEY")
+    current_app.config["BASELINE_HMAC_KEY"] = ""
 
     with pytest.raises(
         monitor.BaselineVerificationError,
@@ -579,11 +831,39 @@ def test_missing_hmac_key_raises_clear_error(monitoring_paths, monkeypatch):
         monitor.check_integrity()
 
 
+def test_monitor_configuration_validation_checks_required_settings(
+    monitoring_paths,
+    monkeypatch,
+):
+    monitor.validate_monitor_configuration()
+
+    current_app.config["ALERT_COOLDOWN_SECONDS"] = -1
+
+    with pytest.raises(ValueError, match="non-negative integer"):
+        monitor.validate_monitor_configuration()
+
+
+@pytest.mark.parametrize(
+    "contents",
+    [
+        "[]",
+        "{}",
+        '{"ignored_files": "not-a-list"}',
+    ],
+)
+def test_whitelist_configuration_errors_are_clear(
+    monitoring_paths,
+    contents,
+):
+    _, _, whitelist_file = monitoring_paths
+    whitelist_file.write_text(contents, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Whitelist"):
+        monitor.validate_monitor_configuration()
+
+
 def test_known_example_baseline_key_is_rejected(monitoring_paths, monkeypatch):
-    monkeypatch.setenv(
-        "BASELINE_HMAC_KEY",
-        "replace_with_a_long_random_secret",
-    )
+    current_app.config["BASELINE_HMAC_KEY"] = "replace_with_a_long_random_secret"
 
     with pytest.raises(
         monitor.BaselineVerificationError,

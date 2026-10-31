@@ -3,8 +3,23 @@ import io
 import sqlite3
 from pathlib import Path
 
-from app import app
+import pytest
+
 from src import database
+
+
+app = None
+
+
+@pytest.fixture(autouse=True)
+def bind_app_instance(app_instance):
+    global app
+    app = app_instance
+
+
+@pytest.fixture
+def app_instance(app):
+    return app
 
 
 def test_initialize_database_migrates_existing_events_table(tmp_path, monkeypatch):
@@ -54,6 +69,18 @@ def test_initialize_database_migrates_existing_events_table(tmp_path, monkeypatc
     assert column_defaults["status_changed_at"] == "NULL"
     assert column_defaults["actor"] == "NULL"
     assert column_defaults["details"] == "NULL"
+
+
+def test_initialize_database_creates_configured_database_parent(
+    tmp_path,
+    monkeypatch,
+):
+    database_path = tmp_path / "new-directory" / "security.db"
+    monkeypatch.setattr(database, "DB_PATH", str(database_path))
+
+    database.initialize_database()
+
+    assert database_path.is_file()
 
 
 def test_count_users_returns_count_and_closes_connection(
@@ -222,7 +249,9 @@ def test_history_combines_filename_severity_and_status_filters(
     tmp_path,
     monkeypatch,
 ):
-    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "combined.db"))
+    database_path = tmp_path / "combined.db"
+    monkeypatch.setattr(database, "DB_PATH", str(database_path))
+    app.config["DATABASE"] = str(database_path)
     database.initialize_database()
     database.save_event(
         "2026-10-30T08:00:00+00:00",
@@ -262,7 +291,9 @@ def test_status_update_route_requires_csrf_and_records_session_user(
     tmp_path,
     monkeypatch,
 ):
-    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "route.db"))
+    database_path = tmp_path / "route.db"
+    monkeypatch.setattr(database, "DB_PATH", str(database_path))
+    app.config["DATABASE"] = str(database_path)
     database.initialize_database()
     database.save_event(
         "2026-10-30 08:00:00",
@@ -294,7 +325,9 @@ def test_csv_export_contains_status_and_change_metadata(
     monkeypatch,
 ):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "csv.db"))
+    database_path = tmp_path / "csv.db"
+    monkeypatch.setattr(database, "DB_PATH", str(database_path))
+    app.config["DATABASE"] = str(database_path)
     database.initialize_database()
     database.save_event(
         "2026-10-30 08:00:00",
@@ -314,7 +347,11 @@ def test_csv_export_contains_status_and_change_metadata(
             session["logged_in"] = True
         response = client.get("/download-csv")
 
-    rows = list(csv.reader(io.StringIO(response.get_data(as_text=True))))
+    try:
+        rows = list(csv.reader(io.StringIO(response.get_data(as_text=True))))
+    finally:
+        response.close()
+
     assert rows[0] == [
         "Timestamp",
         "Severity",
@@ -340,7 +377,9 @@ def test_csv_export_neutralizes_spreadsheet_formulas(
     monkeypatch,
 ):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "csv-formula.db"))
+    database_path = tmp_path / "csv-formula.db"
+    monkeypatch.setattr(database, "DB_PATH", str(database_path))
+    app.config["DATABASE"] = str(database_path)
     database.initialize_database()
     database.save_event(
         "2026-10-30 08:00:00",
@@ -366,7 +405,11 @@ def test_csv_export_neutralizes_spreadsheet_formulas(
             session["logged_in"] = True
         response = client.get("/download-csv")
 
-    rows = list(csv.reader(io.StringIO(response.get_data(as_text=True))))
+    try:
+        rows = list(csv.reader(io.StringIO(response.get_data(as_text=True))))
+    finally:
+        response.close()
+
     assert rows[1][3] == "normal.txt"
     assert rows[2][3] == "'  @SUM(1,1)"
     assert rows[3][3] == '\'=HYPERLINK("https://example.test","open")'
@@ -377,7 +420,9 @@ def test_json_and_pdf_routes_include_event_status(
     monkeypatch,
 ):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "exports.db"))
+    database_path = tmp_path / "exports.db"
+    monkeypatch.setattr(database, "DB_PATH", str(database_path))
+    app.config["DATABASE"] = str(database_path)
     database.initialize_database()
     database.save_event(
         "2026-10-30 08:00:00",
@@ -413,8 +458,9 @@ def test_json_and_pdf_routes_include_event_status(
 
         json_response = client.get("/download-report")
         json_report = json_response.get_data(as_text=True)
+        json_response.close()
         assert json_response.status_code == 200
-        assert report_path.exists()
+        assert not report_path.exists()
         assert '"status": "resolved"' in json_report
         assert '"status_changed_by": "analyst"' in json_report
         assert '"actor": null' in json_report
@@ -427,3 +473,4 @@ def test_json_and_pdf_routes_include_event_status(
         "analyst",
         "2026-10-30 08:10:00",
     )
+    response.close()

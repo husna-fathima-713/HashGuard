@@ -1,20 +1,39 @@
-from app import app
+import pytest
+
 from src import database
 from src import email_alert
+
+
+app = None
+
+
+@pytest.fixture(autouse=True)
+def bind_app_instance(app_instance):
+    global app
+    app = app_instance
+
+
+@pytest.fixture
+def app_instance(app):
+    return app
 
 
 def test_settings_page_persists_recipient_used_by_email_alerts(
     tmp_path,
     monkeypatch,
 ):
-    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "settings.db"))
+    database_path = tmp_path / "settings.db"
+    monkeypatch.setattr(database, "DB_PATH", str(database_path))
+    app.config["DATABASE"] = str(database_path)
     database.initialize_database()
     monkeypatch.setitem(app.config, "WTF_CSRF_ENABLED", False)
-    monkeypatch.setenv("EMAIL_ADDRESS", "sender@example.com")
-    monkeypatch.setenv("EMAIL_PASSWORD", "test-app-password")
-    monkeypatch.setenv("TO_EMAIL", "fallback@example.com")
-    monkeypatch.setenv("SMTP_HOST", "smtp.example.net")
-    monkeypatch.setenv("SMTP_PORT", "587")
+    app.config.update(
+        EMAIL_ADDRESS="sender@example.com",
+        EMAIL_PASSWORD="test-app-password",
+        TO_EMAIL="fallback@example.com",
+        SMTP_HOST="smtp.example.net",
+        SMTP_PORT=587,
+    )
 
     sent_messages = []
 
@@ -72,7 +91,9 @@ def test_invalid_email_recipient_is_rejected_without_saving(
     tmp_path,
     monkeypatch,
 ):
-    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "invalid.db"))
+    database_path = tmp_path / "invalid.db"
+    monkeypatch.setattr(database, "DB_PATH", str(database_path))
+    app.config["DATABASE"] = str(database_path)
     database.initialize_database()
     monkeypatch.setitem(app.config, "WTF_CSRF_ENABLED", False)
 
@@ -94,12 +115,12 @@ def test_test_email_skips_smtp_when_configuration_is_incomplete(
     tmp_path,
     monkeypatch,
 ):
-    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "missing-config.db"))
+    database_path = tmp_path / "missing-config.db"
+    monkeypatch.setattr(database, "DB_PATH", str(database_path))
+    app.config["DATABASE"] = str(database_path)
     database.initialize_database()
     monkeypatch.setitem(app.config, "WTF_CSRF_ENABLED", False)
-    monkeypatch.delenv("EMAIL_ADDRESS", raising=False)
-    monkeypatch.delenv("EMAIL_PASSWORD", raising=False)
-    monkeypatch.setenv("TO_EMAIL", "recipient@example.org")
+    app.config.update(EMAIL_ADDRESS="", EMAIL_PASSWORD="", TO_EMAIL="recipient@example.org")
     monkeypatch.setattr(
         email_alert.smtplib,
         "SMTP",
@@ -126,28 +147,35 @@ def test_blank_saved_recipient_falls_back_to_to_email(
     tmp_path,
     monkeypatch,
 ):
-    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "fallback.db"))
+    database_path = tmp_path / "fallback.db"
+    monkeypatch.setattr(database, "DB_PATH", str(database_path))
+    app.config["DATABASE"] = str(database_path)
     database.initialize_database()
     database.set_app_setting("alert_recipient", " ")
-    monkeypatch.setenv("TO_EMAIL", "fallback@example.org")
-
-    assert email_alert.get_alert_recipient() == "fallback@example.org"
+    with app.app_context():
+        app.config["TO_EMAIL"] = "fallback@example.org"
+        assert email_alert.get_alert_recipient() == "fallback@example.org"
 
 
 def test_invalid_smtp_port_disables_test_delivery(
     tmp_path,
     monkeypatch,
 ):
-    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "smtp-port.db"))
+    database_path = tmp_path / "smtp-port.db"
+    monkeypatch.setattr(database, "DB_PATH", str(database_path))
+    app.config["DATABASE"] = str(database_path)
     database.initialize_database()
-    monkeypatch.setenv("EMAIL_ADDRESS", "sender@example.com")
-    monkeypatch.setenv("EMAIL_PASSWORD", "test-app-password")
-    monkeypatch.setenv("SMTP_PORT", "not-a-port")
-    monkeypatch.setenv("TO_EMAIL", "recipient@example.org")
-
-    configuration = email_alert.get_email_configuration_status(
-        "recipient@example.org"
+    app.config.update(
+        EMAIL_ADDRESS="sender@example.com",
+        EMAIL_PASSWORD="test-app-password",
+        SMTP_PORT="not-a-port",
+        TO_EMAIL="recipient@example.org",
     )
+
+    with app.app_context():
+        configuration = email_alert.get_email_configuration_status(
+            "recipient@example.org"
+        )
 
     assert not configuration["ready"]
     assert "SMTP_PORT must be an integer" in configuration["message"]
