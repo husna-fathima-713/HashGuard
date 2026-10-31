@@ -13,6 +13,7 @@ __pycache__/
 __pycache__/
 *.pyc
 .pytest_cache/
+.coverage*
 .ruff_cache/
 .env
 .venv*/

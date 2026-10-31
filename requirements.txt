@@ -4,4 +4,5 @@ APScheduler==3.11.2
 Flask-Limiter==4.1.1
 reportlab==5.1.0
 python-dotenv==1.2.2
-Werkzeug==3.1.8
+Werkzeug==3.1.9
+concurrent-log-handler==0.9.31

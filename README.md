@@ -71,8 +71,8 @@ HashGuard solves this by:
 4. HashGuard verifies the baseline signature before comparing the current file state against it.
 5. Any mismatch is identified as an integrity event.
 6. Events are stored in `database/security.db` and written to the configured logs.
-7. The dashboard runs a scan and reads the resulting database summary and recent events; history filters and analytics use the same event records.
-8. JSON downloads run a fresh scan before exporting, while CSV and PDF exports use the current database contents.
+7. The dashboard reads event summaries from the database. An authenticated POST action runs scans through the shared scanner service.
+8. JSON, CSV, and PDF downloads use the current database contents and do not trigger scans.
 
 ---
 
@@ -107,6 +107,9 @@ This is handled in `src/monitor.py`, which compares the current file set against
 ```text
 HashGuard/
 ├── app.py                     # Flask app and route definitions
+├── wsgi.py                    # WSGI factory entrypoint
+├── cli.py                     # One-shot CLI scanner
+├── scheduler_main.py          # Locked standalone scheduler
 ├── .github/
 │   └── workflows/
 │       └── ci.yml              # GitHub Actions lint and test workflow
@@ -136,6 +139,12 @@ HashGuard/
 │   ├── pdf-report.jpeg       # Screenshot for PDF report
 │   └── register.jpeg         # Screenshot for register page
 ├── src/
+│   ├── config.py              # Environment parsing and validation
+│   ├── extensions.py          # Shared Flask extensions
+│   ├── event_status.py        # Canonical event statuses
+│   ├── logging_setup.py       # Rotating logging configuration
+│   ├── scan_settings.py       # Persisted interval and folder settings
+│   ├── scheduler_service.py   # Scheduled scanner wrapper
 │   ├── database.py           # SQLite utility functions for events and users
 │   ├── email_alert.py        # SMTP email notification logic
 │   ├── hasher.py             # SHA-256 hashing helper
@@ -189,8 +198,11 @@ source .venv/bin/activate
 ### 3. Install dependencies
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env  # PowerShell
 ```
+
+Replace both example secrets in `.env` with distinct random values before startup.
 
 ---
 
@@ -202,27 +214,54 @@ From the project root:
 python app.py
 ```
 
+In a second terminal, start the integrity scheduler:
+
+```bash
+python scheduler_main.py
+```
+
+Run one scan from the shared CLI service:
+
+```bash
+python cli.py scan
+```
+
 Then open:
 
 ```text
 http://127.0.0.1:5000/login
 ```
 
+The scheduler is a separate process and is never started by importing `app`.
+It acquires an OS-level lock in `LOGS_DIR`, refreshes persisted interval
+settings, and reads the current watched folder before each shared-service scan.
+Run exactly one `python scheduler_main.py` process alongside the web workers.
+On Linux/macOS, install Gunicorn separately with `python -m pip install gunicorn`
+and start the WSGI factory with `gunicorn wsgi:app`. Both processes must share
+the same environment, database, logs directory, and watched files.
+
 ---
 
 ## Environment configuration
 
-The project supports SMTP email notifications for critical events and conditional account registration. Create a `.env` file in the project root from `.env.example` or add the values below:
+The project reads environment variables only in `src/config.py`. Copy
+`.env.example` to `.env` and configure the listed paths, credentials, rate-limit
+storage, and scan behavior there.
 
 ```env
-ALLOW_REGISTRATION=false
+HASHGUARD_ROOT=.
 SECRET_KEY=replace_with_a_long_random_secret
+BASELINE_HMAC_KEY=replace_with_a_long_random_secret
 FLASK_DEBUG=false
-EMAIL_ADDRESS=
-EMAIL_PASSWORD=
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-TO_EMAIL=
+DATABASE_PATH=database/security.db
+LOGS_DIR=logs
+REPORTS_DIR=reports
+SCAN_ROOT=watched
+WATCHED_FOLDER=.
+BASELINE_FILE=baseline/hashes.json
+WHITELIST_FILE=whitelist.json
+SCAN_INTERVAL_SECONDS=300
+RATELIMIT_STORAGE_URI=memory://
 ```
 
 Notes:
@@ -233,16 +272,38 @@ Notes:
 - Set `ALLOW_REGISTRATION=true` to allow new registrations while the app is running.
 - Set a unique, random `SECRET_KEY`; the app refuses to start if it is missing while `FLASK_DEBUG` is false. A temporary random key is generated only in debug mode.
 - Replace the example value for both `SECRET_KEY` and `BASELINE_HMAC_KEY`; HashGuard rejects the example placeholder instead of using a publicly known signing key.
-- `FLASK_DEBUG` enables debug mode only when set to a truthy value. `SESSION_COOKIE_SECURE` independently controls whether the browser sends session cookies only over HTTPS (default: `false` for local HTTP).
+- At startup, HashGuard validates `BASELINE_HMAC_KEY`, `ALERT_COOLDOWN_SECONDS`, and the `whitelist.json` structure. Invalid required monitor configuration stops startup with a clear error instead of failing on the first scan.
+- `FLASK_DEBUG` enables debug mode only when set to a truthy value. `SESSION_COOKIE_SECURE` controls whether the browser sends session cookies only over HTTPS; it defaults to `true` outside debug mode and `false` in debug mode. Set it to `false` only for local HTTP development, never for a production deployment.
 - `BASELINE_HMAC_KEY` is required to sign and verify the integrity baseline. Back it up securely; without the original key, an existing signed baseline cannot be verified.
 - Login and registration requests are rate limited (5/minute and 5/hour, respectively).
-- `SCAN_INTERVAL_SECONDS` sets the background integrity scan interval in seconds (default: `300`).
+- `RATELIMIT_STORAGE_URI` configures Flask-Limiter storage and defaults to `memory://`. In-memory storage is single-process only; for multi-worker deployments, configure Redis (for example, `redis://localhost:6379/0`) and install the optional client with `python -m pip install -r requirements.txt -r requirements-redis.txt`.
+- `SCAN_INTERVAL_SECONDS` sets the initial scheduler interval. Authenticated settings changes are persisted in SQLite and the scheduler reloads them without restart; its active folder is likewise read from the database for every scan.
+- `SCAN_METADATA_CACHE` enables an optional per-process size/mtime cache for integrity scans. It defaults to disabled, so every scan hashes every file. Enabling it skips hashing when device, inode, size, and modification time match a prior scan; files changed while preserving those values can evade detection until a full-hash scan. Disable it for security-sensitive deployments or run periodic full-hash verification.
 - `ALERT_COOLDOWN_SECONDS` sets how long an unchanged, unresolved alert waits before it can be recorded and emailed again (default: `3600`). Changed file state or a resolved-then-reappearing alert can notify immediately.
 - Structured security events are appended as one JSON object per line to `logs/security.jsonl`, alongside `logs/security.log`. Set `SYSLOG_HOST` to enable optional UDP syslog forwarding; `SYSLOG_PORT` defaults to `514` and `SYSLOG_FACILITY` defaults to `user`.
+- Both local event logs rotate at 10 MiB and retain five backups. Rotation is coordinated across processes; older entries are retained in the numbered backup files.
 - For Gmail, use an app password rather than your normal account password.
 - If email configuration is missing or invalid, alert delivery is skipped or reported in the server logs instead of stopping the scanner.
 - Syslog forwarding is optional: invalid or unavailable syslog configuration is logged without preventing local event persistence or email alerts.
 - Integrity checks fail visibly rather than reporting false deletions when the watched directory is missing or unreadable.
+- Large baseline and integrity scans log progress every 100 successfully hashed files.
+
+### Development commands
+
+Install development tools and run the suite using:
+
+```bash
+python -m pip install -r requirements-dev.txt
+```
+
+Use `make setup`, `make run`, `make scheduler`, `make scan`, `make test`,
+`make lint`, `make check`, or `make coverage`. On Windows, run the matching
+Python commands directly if GNU Make is unavailable. Install the Ruff
+pre-commit hook with `pre-commit install`.
+
+GitHub Actions runs Ruff, pytest with coverage, `pip-audit`, and Bandit on
+Python 3.11 and 3.12. Pip dependencies are cached from the requirements files;
+the security scanners are installed in CI and are not application dependencies.
 
 ### Structured security logs
 
@@ -270,6 +331,8 @@ Each line in `logs/security.jsonl` has this schema:
 ### Register an account
 
 Navigate to `/register` and create a user.
+With the default `ALLOW_REGISTRATION=false`, only the first account can be
+created; additional registrations require the setting to be explicitly enabled.
 
 ### Log in
 
@@ -277,7 +340,9 @@ Use the login page and authenticate with your created account.
 
 ### Prepare monitored files
 
-Place files into the `watched/` folder:
+Place files under the configured watched folder. On a fresh install, sign in
+and explicitly approve the current contents using **Approve baseline**; scans
+never trust or create a missing baseline automatically.
 
 ```text
 watched/
@@ -289,7 +354,10 @@ Once files are in place, the baseline should be created. From the dashboard, use
 
 ### Check for alerts
 
-The application runs integrity checks in the background at the configured interval, and opening the dashboard also runs a check. Alerts are stored and displayed for:
+The web dashboard does not scan on page load. Use **Run scan** for an
+immediate check, or run the standalone scheduler process for recurring checks
+at the configured interval. Both use the same scanner and saved scan settings.
+Alerts are stored and displayed for:
 
 - modified files
 - deleted files
