@@ -21,3 +21,5 @@ database/*.db
 logs/
 reports/
 baseline/hashes.json
+
+.vscode/
