@@ -3,6 +3,23 @@ reports/*.csv
 reports/*.json
 
 database/*.db
+baseline/hashes.json
+logs/*.log
+logs/*.jsonl
 
 __pycache__/
 *.pyc
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage*
+.ruff_cache/
+.env
+.venv*/
+database/*.db
+logs/
+reports/
+baseline/hashes.json
+
+.vscode/

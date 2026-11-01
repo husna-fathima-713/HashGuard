@@ -1,90 +1,129 @@
-<!DOCTYPE html>
-<html>
-
+<!doctype html>
+<html lang="en">
 <head>
-
-    <title>Security Event History</title>
-
-    <link rel="stylesheet"
-          href="{{ url_for('static', filename='style.css') }}">
-
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Event history | HashGuard</title>
+    <link rel="icon" href="{{ url_for('web.favicon') }}" type="image/svg+xml">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
+<body class="app-page">
+    <main class="app-shell">
+        <header class="app-header">
+            <a class="app-brand" href="{{ url_for('web.dashboard') }}">
+                <span class="brand-mark" aria-hidden="true">#</span>
+                <span><strong>HashGuard</strong><small>File integrity monitoring</small></span>
+            </a>
+            <nav class="app-nav" aria-label="Main navigation">
+                <a href="{{ url_for('web.dashboard') }}">Dashboard</a>
+                <a class="active" href="{{ url_for('web.history') }}">Event history</a>
+                <a href="{{ url_for('web.analytics') }}">Analytics</a>
+                <a href="{{ url_for('web.download_report') }}">Download report</a>
+                <a href="{{ url_for('web.settings') }}">Settings</a>
+                <form method="POST" action="{{ url_for('web.logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="nav-button" type="submit">Sign out</button>
+                </form>
+            </nav>
+        </header>
 
-<body>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, message in messages %}
+                <div class="app-notice {{ category }}" role="status">{{ message }}</div>
+            {% endfor %}
+        {% endwith %}
 
-    <h1>Security Event History</h1>
+        <section class="page-heading">
+            <div>
+                <p class="eyebrow">DATABASE ACTIVITY</p>
+                <h1>Event history</h1>
+                <p class="muted">Search, filter, and triage events stored by the integrity scanner.</p>
+            </div>
+            <div class="export-actions">
+                <a class="button button-secondary" href="{{ url_for('web.download_csv') }}">Export CSV</a>
+                <a class="button button-secondary" href="{{ url_for('web.download_pdf') }}">Export PDF</a>
+            </div>
+        </section>
 
-    <a href="/">
-        <button>Back to Dashboard</button>
-    </a>
+        <section class="content-panel">
+            <form class="filter-form" method="GET" action="{{ url_for('web.history') }}">
+                <label>
+                    <span>Filename</span>
+                    <input type="search" name="filename" value="{{ selected_filename }}" placeholder="Search paths">
+                </label>
+                <label>
+                    <span>Severity</span>
+                    <select name="severity">
+                        <option value="">All severities</option>
+                        {% for severity in ("LOW", "MEDIUM", "HIGH", "CRITICAL") %}
+                            <option value="{{ severity }}" {% if selected_severity == severity %}selected{% endif %}>{{ severity }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    <span>Status</span>
+                    <select name="status">
+                        <option value="">All statuses</option>
+                        {% for status in event_statuses %}
+                            <option value="{{ status }}" {% if selected_status == status %}selected{% endif %}>{{ status.replace("_", " ")|title }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <div class="filter-buttons">
+                    <button class="button button-primary" type="submit">Apply filters</button>
+                    <a class="text-link" href="{{ url_for('web.history') }}">Clear</a>
+                </div>
+            </form>
+        </section>
 
-    <br><br>
-
-    <form action="/search">
-
-        <input
-            type="text"
-            name="filename"
-            placeholder="Search filename">
-
-        <button type="submit">
-
-            Search
-
-        </button>
-
-    </form>
-
-    <br>
-
-    <form action="/filter">
-
-        <select name="severity">
-
-            <option value="HIGH">HIGH</option>
-
-            <option value="MEDIUM">MEDIUM</option>
-
-            <option value="CRITICAL">CRITICAL</option>
-
-        </select>
-
-        <button type="submit">
-
-            Filter
-
-        </button>
-
-    </form>
-
-    <br><br>
-
-    <table border="1">
-
-        <tr>
-
-            <th>Timestamp</th>
-            <th>Severity</th>
-            <th>Event Type</th>
-            <th>Filename</th>
-
-        </tr>
-
-        {% for event in events %}
-
-        <tr>
-
-            <td>{{ event[0] }}</td>
-            <td>{{ event[1] }}</td>
-            <td>{{ event[2] }}</td>
-            <td>{{ event[3] }}</td>
-
-        </tr>
-
-        {% endfor %}
-
-    </table>
-
+        <section class="content-panel">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">RESULTS</p>
+                    <h2>{{ events|length }} event{{ "" if events|length == 1 else "s" }}</h2>
+                </div>
+            </div>
+            {% if events %}
+                <div class="table-wrap">
+                    <table class="data-table history-table">
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th><th>Severity</th><th>Event</th><th>File</th>
+                                <th>Actor</th><th>Details</th><th>Status</th><th>Changed by / at</th><th>Update</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for event in events %}
+                                <tr>
+                                    <td>{{ event[0] }}</td>
+                                    <td><span class="severity-badge severity-{{ event[1]|lower }}">{{ event[1] }}</span></td>
+                                    <td>{{ event[2] }}</td>
+                                    <td class="file-cell">{{ event[3] }}</td>
+                                    <td>{{ event[8] or "—" }}</td>
+                                    <td class="details-cell">{{ event[9] or "—" }}</td>
+                                    <td><span class="status-badge status-{{ event[4]|replace("_", "-") }}">{{ event[4]|replace("_", " ") }}</span></td>
+                                    <td>{{ event[5] or "—" }}{% if event[6] %}<small class="table-subtext">{{ event[6] }}</small>{% endif %}</td>
+                                    <td>
+                                        <form class="status-form" method="POST" action="{{ url_for('web.update_security_event_status', event_id=event[7], filename=selected_filename, severity=selected_severity, status=selected_status) }}">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                            <label class="sr-only" for="status-{{ event[7] }}">Status for event {{ event[7] }}</label>
+                                            <select id="status-{{ event[7] }}" name="status">
+                                                {% for status in event_statuses %}
+                                                    <option value="{{ status }}" {% if event[4] == status %}selected{% endif %}>{{ status.replace("_", " ")|title }}</option>
+                                                {% endfor %}
+                                            </select>
+                                            <button class="button button-small" type="submit">Save</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="empty-state">No events match these filters.</p>
+            {% endif %}
+        </section>
+    </main>
 </body>
-
 </html>
